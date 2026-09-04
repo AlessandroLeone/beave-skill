@@ -1,0 +1,10 @@
+node_modules/
+.npm-cache/
+.logs/
+*.tgz
+.beave/
+.DS_Store
+Thumbs.db
+temp/
+dist/backups/
+lib/

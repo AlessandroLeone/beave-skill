@@ -1,0 +1,59 @@
+{
+  "name": "@beavelab/beave",
+  "version": "0.2.0-alpha.1",
+  "description": "Human-governed project discovery, planning, multi-agent orchestration, and durable resume.",
+  "type": "module",
+  "bin": {
+    "beave": "lib/bin/beave.js"
+  },
+  "files": [
+    "lib",
+    "skills/beave/SKILL.md",
+    "skills/beave/VERSION",
+    "skills/beave/agents",
+    "skills/beave/assets",
+    "skills/beave/references",
+    "skills/beave/schemas",
+    "dist/beave-portable.md",
+    "README.md",
+    "CHANGELOG.md",
+    "VERSION",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "verify": "npm test && npm run pack:check && npm run site:check",
+    "pack:check": "npm pack --dry-run",
+    "site": "node scripts/serve-site.mjs",
+    "site:check": "node scripts/check-site.mjs",
+    "portable": "node lib/bin/beave.js export --target portable --output-dir dist"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "keywords": [
+    "agent-skills",
+    "project-planning",
+    "multi-agent",
+    "orchestration",
+    "codex",
+    "claude",
+    "gemini"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlessandroLeone/beave-skill.git"
+  },
+  "homepage": "https://beavelab.it",
+  "bugs": {
+    "url": "https://github.com/AlessandroLeone/beavelab/issues"
+  },
+  "license": "Apache-2.0",
+  "private": false,
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
+  }
+}
