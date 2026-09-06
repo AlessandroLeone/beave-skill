@@ -8,3 +8,5 @@ Thumbs.db
 temp/
 dist/backups/
 lib/
+dist/sea-config.json
+dist/sea-prep.blob

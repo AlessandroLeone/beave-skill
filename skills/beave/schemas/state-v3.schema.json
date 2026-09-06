@@ -85,12 +85,19 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "path", "status", "revision"],
+        "required": ["id", "base_path", "working_path", "status", "revision", "content_hash"],
         "properties": {
           "id": {"type": "string", "pattern": "^ART-[a-f0-9]{8,12}$"},
-          "path": {"type": "string"},
+          "base_path": {"type": "string"},
+          "working_path": {"type": "string"},
           "status": {"enum": ["DRAFT", "PUBLISHED", "DEPRECATED"]},
-          "revision": {"type": "integer"}
+          "revision": {"type": "integer"},
+          "content_hash": {"type": "string"},
+          "lock_owner": {"type": "string"},
+          "provenance": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
         }
       }
     },

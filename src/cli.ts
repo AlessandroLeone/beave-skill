@@ -8,6 +8,8 @@ const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const SKILL_ROOT = path.join(PACKAGE_ROOT, "skills", "beave");
 const VERSION = fs.readFileSync(path.join(PACKAGE_ROOT, "VERSION"), "utf8").trim();
 const SCHEMA_VERSION = 3;
+
+
 const PROJECT_MODES = new Set(["Genesis", "Adoption", "Reconstruction", "Evolution", "Resume"]);
 const INTERACTION_MODES = new Set(["Guided", "Standard", "Expert"]);
 const MODULE_STATUSES = new Set(["NOT STARTED", "IN DISCUSSION", "CONFIRMED", "PARTIAL", "DEFERRED", "NOT APPLICABLE", "BLOCKED"]);
@@ -87,7 +89,7 @@ interface Override {
 
 interface Decision { id: string; title: string; status: string; owner?: string; revision: number; updated_at: string; }
 interface Requirement { id: string; title: string; status: string; revision: number; }
-interface Artifact { id: string; path: string; status: string; revision: number; }
+interface Artifact { id: string; base_path: string; working_path: string; status: string; revision: number; content_hash: string; lock_owner: string; provenance: string[]; }
 interface Task { id: string; title: string; status: string; revision: number; }
 interface Dependency { id: string; from: string; to: string; type: string; }
 interface Gate { id: string; name: string; status: string; }
@@ -225,6 +227,44 @@ function appendEvent(root: string, event: any): void {
   atomicWrite(location, `${prior ? `${prior}\n` : ""}${JSON.stringify(event)}\n`);
 }
 
+function idempotencyKey(flags: Flags): string {
+  return sha256(JSON.stringify(flags));
+}
+
+function checkIdempotency(root: string, key: string): boolean {
+  const eventsPath = path.join(stateRoot(root), "events.jsonl");
+  if (!fs.existsSync(eventsPath)) return false;
+  const lines = fs.readFileSync(eventsPath, "utf8").split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return false;
+  try {
+    const latest = JSON.parse(lines.at(-1)!);
+    return latest.idempotency_key === key;
+  } catch {
+    return false;
+  }
+}
+
+function assertNotBlocked(state: State): void {
+  if (state.needs_reconciliation) {
+    throw new BeaveError("State is BLOCKED pending human reconciliation. Resolve open overrides before continuing.");
+  }
+}
+
+function commitState(root: string, location: string, state: State, event: any): void {
+  const errors = stateErrors(root, state, event);
+  if (errors.length) {
+    throw new BeaveError(`Transaction failed validation:\n- ${errors.join("\n- ")}`);
+  }
+  appendEvent(root, event);
+  try {
+    writeJson(location, state);
+  } catch (error) {
+    // If state write fails after event was written, they might be out of sync,
+    // but the next run's stateErrors will flag it or migrate can fix it.
+    throw error;
+  }
+}
+
 function assertKnownOwner(state: any, owner: string): void {
   const known = new Set(Object.values(state.decision_owners ?? {}).map((value) => String(value).trim()));
   if (!known.has(owner.trim())) throw new BeaveError(`Owner is not one of the confirmed decision owners: ${owner}`);
@@ -286,7 +326,7 @@ function detectCycles(dependencies: Dependency[]): string[] {
   return cycles;
 }
 
-function stateErrors(root: string, state: State): string[] {
+function stateErrors(root: string, state: State, pendingEvent?: any): string[] {
   const errors: string[] = [];
   if (state.schema_version !== SCHEMA_VERSION) errors.push(`unsupported schema_version=${state.schema_version}`);
   if (state.project?.root !== root) errors.push("project root does not match requested root");
@@ -323,9 +363,9 @@ function stateErrors(root: string, state: State): string[] {
   }
 
   const events = path.join(stateRoot(root), "events.jsonl");
-  if (!fs.existsSync(events)) errors.push("events.jsonl is missing");
-  else {
-    const parsed: any[] = [];
+  let parsed: any[] = [];
+  if (!fs.existsSync(events) && !pendingEvent) errors.push("events.jsonl is missing");
+  else if (fs.existsSync(events)) {
     const ids = new Set<string>();
     let priorAt = "";
     let priorRevision = 0;
@@ -348,14 +388,17 @@ function stateErrors(root: string, state: State): string[] {
         errors.push(`invalid JSON event at line ${index + 1}`);
       }
     }
-    if (!Number.isInteger(state.revision) || state.revision < 1) errors.push("revision must be a positive integer");
-    if (!state.last_event_id) errors.push("last_event_id is required");
-    if (!parsed.length) errors.push("events.jsonl must contain at least one event");
-    else {
-      const latest = parsed.at(-1);
-      if (latest.event_id !== state.last_event_id) errors.push("last_event_id does not match the latest event");
-      if (latest.state_revision !== state.revision) errors.push("state revision does not match the latest event");
-    }
+  }
+  
+  if (pendingEvent) parsed.push(pendingEvent);
+  
+  if (!Number.isInteger(state.revision) || state.revision < 1) errors.push("revision must be a positive integer");
+  if (!state.last_event_id) errors.push("last_event_id is required");
+  if (!parsed.length) errors.push("events.jsonl must contain at least one event");
+  else {
+    const latest = parsed.at(-1);
+    if (latest.event_id !== state.last_event_id) errors.push("last_event_id does not match the latest event");
+    if (latest.state_revision !== state.revision) errors.push("state revision does not match the latest event");
   }
   return errors;
 }
@@ -372,6 +415,8 @@ function contextMarkdown(state: State): string {
     `- Exact next action: ${state.exact_next_action}`, "",
     "## Decision owners", "",
     ...OWNER_KEYS.map((key) => `- ${key}: ${state.decision_owners[key]}`), "",
+    "## Gates", "",
+    ...((state.gates ?? []).length ? (state.gates ?? []).map((item) => `- ${item.name || item.id}: ${item.status}`) : ["- None passed yet."]), "",
     "## Active module", "",
     active ? `- ${active.id} — ${active.title} [${active.status}]` : "- None; questionnaire coverage is complete.", "",
     "## Coverage evidence", "",
@@ -498,9 +543,10 @@ function resume(flags: Flags): void {
 
 function record(flags: Flags): void {
   const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: record already applied.`);
   const { location, state } = loadState(root);
-  if (stateErrors(root, state).length) throw new BeaveError("State is invalid; run validate before record");
-  if (state.needs_reconciliation) throw new BeaveError("Cannot record a questionnaire outcome while a human override is open");
+  assertNotBlocked(state);
   assertKnownOwner(state, required(flags, "owner"));
   const moduleId = Number(required(flags, "module"));
   const outcome = required(flags, "status").toUpperCase().replaceAll("_", " ");
@@ -513,19 +559,21 @@ function record(flags: Flags): void {
   Object.assign(module, { status: outcome, owner: flags.owner, evidence: path.relative(root, sourcePath) || path.basename(sourcePath), evidence_sha256: sha256(bytes), summary: flags.summary && typeof flags.summary === "string" ? flags.summary.trim().slice(0, 240) : null, updated_at: timestamp });
   const active = activeModule(state);
   if (active) state.exact_next_action = `Discuss module ${active.id} — ${active.title}.`;
-  else Object.assign(state, { lifecycle_state: "RESEARCH", current_gate: "G2", exact_next_action: "Review coverage, then approve a bounded research plan or mark research not applicable." });
+  else Object.assign(state, { exact_next_action: "Review coverage, then proceed to G2." });
   state.updated_at = timestamp;
   const revision = state.revision + 1;
   const eventId = crypto.randomUUID();
   state.revision = revision;
   state.last_event_id = eventId;
-  appendEvent(root, { event_id: eventId, type: "MODULE_RECORDED", state_revision: revision, at: timestamp, module: moduleId, status: outcome, owner: flags.owner, evidence: module.evidence, evidence_sha256: module.evidence_sha256 });
-  writeJson(location, state);
+  const event = { event_id: eventId, type: "MODULE_RECORDED", state_revision: revision, at: timestamp, idempotency_key: key, module: moduleId, status: outcome, owner: flags.owner, evidence: module.evidence, evidence_sha256: module.evidence_sha256 };
+  commitState(root, location, state, event);
   console.log(`Recorded module ${moduleId} as ${outcome}`);
 }
 
 function override(flags: Flags): void {
   const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: override already applied.`);
   const { location, state } = loadState(root);
   assertKnownOwner(state, required(flags, "owner"));
   const sourcePath = path.resolve(required(flags, "instruction-file"));
@@ -540,13 +588,15 @@ function override(flags: Flags): void {
   const eventId = crypto.randomUUID();
   state.revision = revision;
   state.last_event_id = eventId;
-  appendEvent(root, { event_id: eventId, type: "HUMAN_OVERRIDE_RECORDED", state_revision: revision, at: timestamp, ...item });
-  writeJson(location, state);
+  const event = { event_id: eventId, type: "HUMAN_OVERRIDE_RECORDED", state_revision: revision, at: timestamp, idempotency_key: key, ...item };
+  commitState(root, location, state, event);
   console.log(`Recorded human override ${item.id}; downstream work requires reconciliation.`);
 }
 
 function reconcile(flags: Flags): void {
   const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: reconcile already applied.`);
   const { location, state } = loadState(root);
   assertKnownOwner(state, required(flags, "owner"));
   const item = state.human_overrides.find((entry) => entry.id === required(flags, "override-id"));
@@ -563,9 +613,71 @@ function reconcile(flags: Flags): void {
   const eventId = crypto.randomUUID();
   state.revision = revision;
   state.last_event_id = eventId;
-  appendEvent(root, { event_id: eventId, type: "HUMAN_OVERRIDE_RECONCILED", state_revision: revision, at: timestamp, override_id: item.id, owner: flags.owner, evidence: item.reconciliation_evidence, evidence_sha256: item.reconciliation_sha256 });
-  writeJson(location, state);
+  const event = { event_id: eventId, type: "HUMAN_OVERRIDE_RECONCILED", state_revision: revision, at: timestamp, idempotency_key: key, override_id: item.id, owner: flags.owner, evidence: item.reconciliation_evidence, evidence_sha256: item.reconciliation_sha256 };
+  commitState(root, location, state, event);
   console.log(`Reconciled human override ${item.id}`);
+}
+
+function gate(flags: Flags): void {
+  const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: gate already applied.`);
+  const { location, state } = loadState(root);
+  assertNotBlocked(state);
+  assertKnownOwner(state, required(flags, "owner"));
+  const gateId = required(flags, "id");
+  const status = required(flags, "status");
+  if (!new Set(["PASSED", "WARN", "BLOCKED", "NOT_APPLICABLE"]).has(status)) {
+    throw new BeaveError(`Invalid gate status: ${status}. Must be PASSED, WARN, BLOCKED, or NOT_APPLICABLE.`);
+  }
+  if (!/^G([0-9]|1[0-2])$/.test(gateId)) {
+    throw new BeaveError(`Invalid gate ID: ${gateId}. Must be G0 through G12.`);
+  }
+  
+  const gateNumber = parseInt(gateId.slice(1), 10);
+  const currentGateNumber = parseInt(state.current_gate.slice(1), 10);
+  if (gateNumber > currentGateNumber) {
+    throw new BeaveError(`Cannot process ${gateId} before completing ${state.current_gate}`);
+  }
+  
+  const sourcePath = flags["evidence-file"] ? path.resolve(String(flags["evidence-file"])) : null;
+  let evidenceStr = null, evidenceSha256 = null;
+  if (sourcePath) {
+    const bytes = fs.readFileSync(sourcePath);
+    evidenceStr = path.relative(root, sourcePath) || path.basename(sourcePath);
+    evidenceSha256 = sha256(bytes);
+  } else if (status === "PASSED" || status === "WARN") {
+    throw new BeaveError("--evidence-file is required for PASSED or WARN");
+  }
+  
+  const timestamp = now();
+  const existing = state.gates.find((g) => g.id === gateId || g.name === gateId);
+  if (existing) {
+    existing.status = status;
+  } else {
+    // Generate a proper GAT- ID, use the provided id as name for easy lookup
+    state.gates.push({ id: `GAT-${crypto.randomBytes(4).toString("hex")}`, name: gateId, status });
+  }
+  
+  if ((status === "PASSED" || status === "WARN" || status === "NOT_APPLICABLE") && gateId === state.current_gate) {
+    const nextNum = gateNumber + 1;
+    if (nextNum <= 12) {
+      state.current_gate = `G${nextNum}`;
+      state.lifecycle_state = nextNum >= 12 ? "OPERATE" : nextNum >= 11 ? "RELEASE" : nextNum >= 8 ? "VERIFY" : nextNum >= 7 ? "EXECUTE" : nextNum >= 6 ? "PLAN" : nextNum >= 5 ? "FOUNDATION" : nextNum >= 4 ? "BLUEPRINT" : nextNum >= 3 ? "RESEARCH" : nextNum >= 2 ? "INTERVIEW" : "DISCOVERY";
+    }
+    state.exact_next_action = `Proceed to ${state.current_gate}.`;
+  } else if (status === "BLOCKED") {
+    state.exact_next_action = `Resolve blockers for ${gateId} and retry.`;
+  }
+  
+  state.updated_at = timestamp;
+  const revision = state.revision + 1;
+  const eventId = crypto.randomUUID();
+  state.revision = revision;
+  state.last_event_id = eventId;
+  const event = { event_id: eventId, type: "GATE_UPDATED", state_revision: revision, at: timestamp, idempotency_key: key, gate_id: gateId, status, owner: flags.owner, evidence: evidenceStr, evidence_sha256: evidenceSha256 };
+  commitState(root, location, state, event);
+  console.log(`Recorded gate ${gateId} as ${status}`);
 }
 
 function contextPack(flags: Flags): void {
@@ -620,9 +732,214 @@ function migrate(flags: Flags): void {
   }
 
   Object.assign(rawState, { schema_version: SCHEMA_VERSION, beave_version: VERSION, intake_strategy: legacy === "Brief-led" ? "Brief-led" : "Adaptive", human_overrides: rawState.human_overrides || [], needs_reconciliation: Boolean(rawState.needs_reconciliation), revision, last_event_id: eventId, updated_at: now() });
-  appendEvent(root, { event_id: eventId, type: "STATE_MIGRATED", state_revision: revision, at: rawState.updated_at, from_schema: rawState.schema_version, to_schema: SCHEMA_VERSION, legacy_interaction_mode: legacy });
-  writeJson(location, rawState);
+  const event = { event_id: eventId, type: "STATE_MIGRATED", state_revision: revision, at: rawState.updated_at, from_schema: rawState.schema_version, to_schema: SCHEMA_VERSION, legacy_interaction_mode: legacy };
+  commitState(root, location, rawState, event);
   console.log(`Migrated Beave state to schema ${SCHEMA_VERSION}.`);
+}
+
+function docSave(flags: Flags): void {
+  const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: doc-save already applied.`);
+  const { location, state } = loadState(root);
+  assertNotBlocked(state);
+  
+  const id = required(flags, "id");
+  const basePath = required(flags, "base-path");
+  const owner = required(flags, "owner");
+  const contentPath = path.resolve(required(flags, "content-file"));
+  const sources = flags.sources ? String(flags.sources).split(",").map(s => s.trim()) : [];
+  
+  const content = fs.readFileSync(contentPath, "utf8");
+  const hash = sha256(content);
+  
+  let artifact = state.artifacts.find(a => a.id === id);
+  if (!artifact) {
+    artifact = {
+      id,
+      base_path: basePath,
+      working_path: "",
+      status: "DRAFT",
+      revision: 0,
+      content_hash: "",
+      lock_owner: owner,
+      provenance: sources
+    };
+    state.artifacts.push(artifact);
+  } else {
+    if (artifact.base_path !== basePath) {
+      throw new BeaveError(`Artifact ${id} base_path mismatch. Expected ${artifact.base_path}`);
+    }
+    if (artifact.lock_owner && artifact.lock_owner !== owner) {
+      throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+    }
+    if (artifact.working_path) {
+      const currentWorkingPath = path.resolve(root, artifact.working_path);
+      if (fs.existsSync(currentWorkingPath)) {
+        const currentDiskHash = sha256(fs.readFileSync(currentWorkingPath, "utf8"));
+        if (currentDiskHash !== artifact.content_hash) {
+          throw new BeaveError(`External edit detected on ${artifact.working_path}. Hashes do not match. Reconcile manually.`);
+        }
+      }
+    }
+  }
+  
+  const newRevision = artifact.revision + 1;
+  const parsedPath = path.parse(basePath);
+  const newWorkingPath = path.posix.join(parsedPath.dir, `${parsedPath.name}-v${newRevision}${parsedPath.ext}`);
+  const absoluteNewWorkingPath = boundedOutput(root, newWorkingPath);
+  
+  if (artifact.working_path) {
+    const currentAbsolute = path.resolve(root, artifact.working_path);
+    const historyDir = path.join(stateRoot(root), "history");
+    fs.mkdirSync(historyDir, { recursive: true });
+    if (fs.existsSync(currentAbsolute)) {
+      fs.renameSync(currentAbsolute, path.join(historyDir, `${id}-v${artifact.revision}${parsedPath.ext}`));
+    }
+  }
+  
+  atomicWrite(absoluteNewWorkingPath, content);
+  
+  artifact.working_path = newWorkingPath;
+  artifact.revision = newRevision;
+  artifact.content_hash = hash;
+  artifact.lock_owner = owner;
+  artifact.provenance = sources;
+  
+  const timestamp = now();
+  state.updated_at = timestamp;
+  const stateRevision = state.revision + 1;
+  const eventId = crypto.randomUUID();
+  state.revision = stateRevision;
+  state.last_event_id = eventId;
+  const event = { event_id: eventId, type: "DOCUMENT_SAVED", state_revision: stateRevision, at: timestamp, idempotency_key: key, artifact_id: id, revision: newRevision, hash, owner, sources };
+  
+  commitState(root, location, state, event);
+  console.log(`Saved document ${id} to ${newWorkingPath} (revision ${newRevision})`);
+}
+
+function docHistory(flags: Flags): void {
+  const root = resolveProject(required(flags, "project-root"));
+  const id = required(flags, "id");
+  const eventsFile = path.join(stateRoot(root), "events.jsonl");
+  if (!fs.existsSync(eventsFile)) return;
+  const lines = fs.readFileSync(eventsFile, "utf8").split(/\r?\n/).filter(Boolean);
+  const history = [];
+  for (const line of lines) {
+    const event = JSON.parse(line);
+    if (event.artifact_id === id) {
+      history.push(event);
+    }
+  }
+  console.log(JSON.stringify(history, null, 2));
+}
+
+function docRestore(flags: Flags): void {
+  const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: doc-restore already applied.`);
+  const { location, state } = loadState(root);
+  assertNotBlocked(state);
+  
+  const id = required(flags, "id");
+  const restoreRevision = Number(required(flags, "revision"));
+  const owner = required(flags, "owner");
+  
+  const artifact = state.artifacts.find(a => a.id === id);
+  if (!artifact) throw new BeaveError(`Artifact ${id} not found.`);
+  
+  if (artifact.lock_owner && artifact.lock_owner !== owner) {
+    throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+  }
+  
+  const parsedPath = path.parse(artifact.base_path);
+  const historyFile = path.join(stateRoot(root), "history", `${id}-v${restoreRevision}${parsedPath.ext}`);
+  
+  if (!fs.existsSync(historyFile)) {
+    throw new BeaveError(`History file for revision ${restoreRevision} not found.`);
+  }
+  
+  const content = fs.readFileSync(historyFile, "utf8");
+  const hash = sha256(content);
+  
+  const newRevision = artifact.revision + 1;
+  const newWorkingPath = path.posix.join(parsedPath.dir, `${parsedPath.name}-v${newRevision}${parsedPath.ext}`);
+  const absoluteNewWorkingPath = boundedOutput(root, newWorkingPath);
+  
+  if (artifact.working_path) {
+    const currentAbsolute = path.resolve(root, artifact.working_path);
+    const historyDir = path.join(stateRoot(root), "history");
+    fs.mkdirSync(historyDir, { recursive: true });
+    if (fs.existsSync(currentAbsolute)) {
+      fs.renameSync(currentAbsolute, path.join(historyDir, `${id}-v${artifact.revision}${parsedPath.ext}`));
+    }
+  }
+  
+  atomicWrite(absoluteNewWorkingPath, content);
+  
+  artifact.working_path = newWorkingPath;
+  artifact.revision = newRevision;
+  artifact.content_hash = hash;
+  artifact.lock_owner = owner;
+  
+  const timestamp = now();
+  state.updated_at = timestamp;
+  const stateRevision = state.revision + 1;
+  const eventId = crypto.randomUUID();
+  state.revision = stateRevision;
+  state.last_event_id = eventId;
+  const event = { event_id: eventId, type: "DOCUMENT_RESTORED", state_revision: stateRevision, at: timestamp, idempotency_key: key, artifact_id: id, restored_revision: restoreRevision, new_revision: newRevision, hash, owner };
+  
+  commitState(root, location, state, event);
+  console.log(`Restored document ${id} to ${newWorkingPath} (from revision ${restoreRevision} as new revision ${newRevision})`);
+}
+
+function docFinalize(flags: Flags): void {
+  const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return console.log(`Idempotent retry: doc-finalize already applied.`);
+  const { location, state } = loadState(root);
+  assertNotBlocked(state);
+  
+  const id = required(flags, "id");
+  const owner = required(flags, "owner");
+  
+  const artifact = state.artifacts.find(a => a.id === id);
+  if (!artifact) throw new BeaveError(`Artifact ${id} not found.`);
+  
+  if (artifact.lock_owner && artifact.lock_owner !== owner) {
+    throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+  }
+  if (!artifact.working_path) {
+    throw new BeaveError(`Artifact ${id} has no working path to finalize.`);
+  }
+  
+  const absoluteWorking = path.resolve(root, artifact.working_path);
+  const absoluteBase = boundedOutput(root, artifact.base_path);
+  
+  if (!fs.existsSync(absoluteWorking)) {
+    throw new BeaveError(`Working file ${absoluteWorking} does not exist.`);
+  }
+  
+  fs.copyFileSync(absoluteWorking, absoluteBase);
+  const parsedPath = path.parse(artifact.base_path);
+  const historyDir = path.join(stateRoot(root), "history");
+  fs.mkdirSync(historyDir, { recursive: true });
+  fs.renameSync(absoluteWorking, path.join(historyDir, `${id}-v${artifact.revision}${parsedPath.ext}`));
+  
+  artifact.working_path = artifact.base_path;
+  artifact.status = "PUBLISHED";
+  
+  const timestamp = now();
+  state.updated_at = timestamp;
+  const stateRevision = state.revision + 1;
+  const eventId = crypto.randomUUID();
+  state.revision = stateRevision;
+  state.last_event_id = eventId;
+  const event = { event_id: eventId, type: "DOCUMENT_FINALIZED", state_revision: stateRevision, at: timestamp, idempotency_key: key, artifact_id: id, owner };
+  
+  commitState(root, location, state, event);
+  console.log(`Finalized document ${id} to ${artifact.base_path}`);
 }
 
 function portableMarkdown(): string {
@@ -648,6 +965,57 @@ function copySkill(destination: string, target: string): void {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.cpSync(SKILL_ROOT, destination, { recursive: true });
   writeJson(path.join(destination, "beave-adapter.json"), { generated_by: `beave ${VERSION}`, target, generated_at: now(), canonical_source_sha256: canonicalSourceDigest() });
+}
+
+function installedSourceDigest(destination: string): string {
+  const files: string[] = [];
+  const visit = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) visit(full);
+      else if (entry.name !== "beave-adapter.json") files.push(full);
+    }
+  };
+  visit(destination);
+  files.sort((left, right) => {
+    const a = path.relative(destination, left).replaceAll("\\", "/");
+    const b = path.relative(destination, right).replaceAll("\\", "/");
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  const digest = crypto.createHash("sha256");
+  for (const location of files) {
+    digest.update(path.relative(destination, location).replaceAll("\\", "/"));
+    digest.update("\0");
+    digest.update(fs.readFileSync(location));
+    digest.update("\0");
+  }
+  return digest.digest("hex");
+}
+
+function verifyInstall(flags: Flags): void {
+  const target = required(flags, "target");
+  const scope = typeof flags.scope === "string" ? flags.scope : "project";
+  if (!new Set(["project", "workspace", "user"]).has(scope)) throw new BeaveError("--scope must be project, workspace, or user");
+  const base = scope === "user" ? os.homedir() : path.resolve((typeof flags["project-root"] === "string" ? flags["project-root"] : undefined) ?? process.cwd());
+  const destination = path.join(base, adapterRelative(target));
+  
+  if (!fs.existsSync(destination)) {
+    throw new BeaveError(`Target ${target} is not installed at ${destination}`);
+  }
+  const manifestFile = path.join(destination, "beave-adapter.json");
+  if (!fs.existsSync(manifestFile)) {
+    throw new BeaveError(`Missing beave-adapter.json in ${destination}`);
+  }
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  if (!manifest.canonical_source_sha256) {
+    throw new BeaveError(`beave-adapter.json lacks canonical_source_sha256`);
+  }
+  
+  const currentDigest = installedSourceDigest(destination);
+  if (currentDigest !== manifest.canonical_source_sha256) {
+    throw new BeaveError(`Drift detected in installed skill at ${destination}. Hashes do not match.`);
+  }
+  console.log(`Installation for ${target} at ${destination} is pristine and matches original source.`);
 }
 
 function exportTarget(flags: Flags): void {
@@ -681,7 +1049,7 @@ function install(flags: Flags): void {
 }
 
 function help(): void {
-  console.log(`Beave ${VERSION}\n\nUsage: beave <command> [options]\n\nCommands:\n  capabilities\n  init --project-root . --project-name NAME --project-mode Resume --interaction-mode Standard --owners-file owners.json\n  status --project-root .\n  next --project-root . [--count 1|2|3]\n  resume --project-root .\n  record --project-root . --module N --status CONFIRMED --answer-file FILE --owner NAME\n  override --project-root . --instruction-file FILE --owner NAME [--reason TEXT]\n  reconcile --project-root . --override-id ID --evidence-file FILE --owner NAME --next-action TEXT\n  context-pack --project-root . [--output session.md]\n  validate --project-root .\n  migrate --project-root .\n  export --target portable|codex|claude|gemini|agy --output-dir DIR\n  install --target codex|claude|gemini|agy|all [--scope project|workspace|user] [--project-root DIR] [--dry-run]\n  version`);
+  console.log(`Beave ${VERSION}\n\nUsage: beave <command> [options]\n\nCommands:\n  capabilities\n  init --project-root . --project-name NAME --project-mode Resume --interaction-mode Standard --owners-file owners.json\n  status --project-root .\n  next --project-root . [--count 1|2|3]\n  resume --project-root .\n  record --project-root . --module N --status CONFIRMED --answer-file FILE --owner NAME\n  override --project-root . --instruction-file FILE --owner NAME [--reason TEXT]\n  reconcile --project-root . --override-id ID --evidence-file FILE --owner NAME --next-action TEXT\n  gate --project-root . --id G2 --status PASSED --evidence-file FILE --owner NAME\n  doc-save --project-root . --id ART-123 --base-path docs/design.md --content-file temp.md --owner NAME [--sources DEC-1]\n  doc-history --project-root . --id ART-123\n  doc-restore --project-root . --id ART-123 --revision N --owner NAME\n  doc-finalize --project-root . --id ART-123 --owner NAME\n  context-pack --project-root . [--output session.md]\n  validate --project-root .\n  migrate --project-root .\n  export --target portable|codex|claude|gemini|agy --output-dir DIR\n  install --target codex|claude|gemini|agy|all [--scope project|workspace|user] [--project-root DIR] [--dry-run]\n  verify-install --target codex|claude|gemini|agy [--scope project|workspace|user] [--project-root DIR]\n  version`);
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -697,13 +1065,20 @@ export async function main(argv: string[]): Promise<number> {
     else if (command === "record") record(flags);
     else if (command === "override") override(flags);
     else if (command === "reconcile") reconcile(flags);
+    else if (command === "gate") gate(flags);
+    else if (command === "doc-save") docSave(flags);
+    else if (command === "doc-history") docHistory(flags);
+    else if (command === "doc-restore") docRestore(flags);
+    else if (command === "doc-finalize") docFinalize(flags);
     else if (command === "context-pack") contextPack(flags);
     else if (command === "validate") {
       validateRoot(resolveProject(required(flags, "project-root")));
       console.log("Beave state is valid.");
-    } else if (command === "migrate") migrate(flags);
+    }
+    else if (command === "migrate") migrate(flags);
     else if (command === "export") exportTarget(flags);
     else if (command === "install") install(flags);
+    else if (command === "verify-install") verifyInstall(flags);
     else throw new BeaveError(`Unknown command: ${command}`);
     return 0;
   } catch (error: any) {

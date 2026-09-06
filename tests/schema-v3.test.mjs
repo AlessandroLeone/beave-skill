@@ -74,7 +74,7 @@ describe("Schema v3 Ledgers", () => {
       decision_owners: { product: "A", technical: "B", budget: "C", safety: "D", release: "E" },
       lifecycle_state: "INTERVIEW",
       current_gate: "G1",
-      modules: [],
+      modules: Array.from({ length: 17 }, (_, index) => ({ id: index, title: `M${index}`, status: "NOT STARTED" })),
       human_overrides: [],
       needs_reconciliation: false,
       revision: 1,
