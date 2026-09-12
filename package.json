@@ -1,6 +1,6 @@
 {
   "name": "@beavelab/beave",
-  "version": "0.2.0-alpha.1",
+  "version": "0.2.0-alpha.3",
   "description": "Human-governed project discovery, planning, multi-agent orchestration, and durable resume.",
   "type": "module",
   "bin": {
@@ -24,11 +24,9 @@
   "scripts": {
     "build": "tsc",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "verify": "npm test && npm run pack:check && npm run site:check",
+    "verify": "npm test && npm run pack:check",
     "prepack": "npm run build",
     "pack:check": "npm pack --dry-run",
-    "site": "node scripts/serve-site.mjs",
-    "site:check": "node scripts/check-site.mjs",
     "portable": "node lib/bin/beave.js export --target portable --output-dir dist",
     "build:exe": "node scripts/build-exe.mjs"
   },

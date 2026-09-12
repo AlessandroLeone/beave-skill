@@ -46,7 +46,16 @@
 
 - Milestones, requirement mapping, dependencies, evidence
 
-## Risks and open decisions
+## Whole-outcome execution package
+
+- COV-001 concern register and EXEC-001 entry point / reading order
+- Full route, work inputs, resources, responsibility, outputs, verification, recovery and terminal conditions
+- Future-dependent detail: prerequisite, owner, resolution procedure, acceptance and blocking point
+- Applicable people/organizations, procurement, equipment/materials and capacity
+- Same-agent or fresh-agent continuation, capability and authorization boundaries
+- Delivery, operation and completion evidence
+
+## Unresolved risks and decisions
 
 - Risks, assumptions with expiry, owners, unblock conditions
 

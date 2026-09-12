@@ -1,16 +1,31 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://beavelab.it/schemas/beave-state-v3.json",
-  "title": "Beave project state",
+  "title": "Beave project state (schema v3 — current)",
+  "description": "The current Beave project state schema. `schema_version` is 3 and this is what `beave init` writes and every command validates against. The older `state.schema.json` in this directory is the historical v2 schema, kept for migration and compatibility only.",
   "type": "object",
   "required": [
     "schema_version",
     "beave_version",
     "project",
     "interaction_mode",
+    "intake_strategy",
     "decision_owners",
     "lifecycle_state",
     "current_gate",
+    "modules",
+    "decisions",
+    "requirements",
+    "artifacts",
+    "tasks",
+    "dependencies",
+    "gates",
+    "risks",
+    "evidence",
+    "agents",
+    "operations",
+    "checkpoints",
+    "blockers",
     "human_overrides",
     "needs_reconciliation",
     "revision",
@@ -20,51 +35,145 @@
     "updated_at"
   ],
   "properties": {
-    "schema_version": {"const": 3},
-    "beave_version": {"type": "string"},
+    "schema_version": {
+      "const": 3
+    },
+    "beave_version": {
+      "type": "string"
+    },
     "project": {
       "type": "object",
-      "required": ["name", "root", "mode"],
+      "required": [
+        "name",
+        "root",
+        "mode"
+      ],
       "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "root": {"type": "string", "minLength": 1},
-        "mode": {"enum": ["Genesis", "Adoption", "Reconstruction", "Evolution", "Resume"]}
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "Genesis",
+            "Adoption",
+            "Reconstruction",
+            "Evolution",
+            "Resume"
+          ]
+        }
       },
       "additionalProperties": false
     },
-    "interaction_mode": {"enum": ["Guided", "Standard", "Expert"]},
-    "intake_strategy": {"enum": ["Adaptive", "Brief-led"]},
+    "interaction_mode": {
+      "enum": [
+        "Guided",
+        "Standard",
+        "Expert"
+      ]
+    },
+    "intake_strategy": {
+      "enum": [
+        "Adaptive",
+        "Brief-led"
+      ]
+    },
     "decision_owners": {
       "type": "object",
-      "required": ["product", "technical", "budget", "safety", "release"],
+      "required": [
+        "product",
+        "technical",
+        "budget",
+        "safety",
+        "release"
+      ],
       "properties": {
-        "product": {"type": "string", "minLength": 1},
-        "technical": {"type": "string", "minLength": 1},
-        "budget": {"type": "string", "minLength": 1},
-        "safety": {"type": "string", "minLength": 1},
-        "release": {"type": "string", "minLength": 1}
+        "product": {
+          "type": "string",
+          "minLength": 1
+        },
+        "technical": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget": {
+          "type": "string",
+          "minLength": 1
+        },
+        "safety": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "additionalProperties": false
     },
     "lifecycle_state": {
-      "enum": ["INTAKE", "DISCOVERY", "INTERVIEW", "RESEARCH", "BLUEPRINT", "FOUNDATION", "PLAN", "EXECUTE", "VERIFY", "RELEASE", "OPERATE"]
+      "enum": [
+        "INTAKE",
+        "DISCOVERY",
+        "INTERVIEW",
+        "RESEARCH",
+        "BLUEPRINT",
+        "FOUNDATION",
+        "PLAN",
+        "EXECUTE",
+        "VERIFY",
+        "RELEASE",
+        "OPERATE"
+      ]
     },
-    "current_gate": {"type": "string", "pattern": "^G([0-9]|1[0-2])$"},
-    
-    "modules": { "type": "array" },
-
+    "current_gate": {
+      "type": "string",
+      "pattern": "^G([0-9]|1[0-2])$"
+    },
+    "modules": {
+      "type": "array"
+    },
     "decisions": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "title", "status", "revision", "updated_at"],
+        "required": [
+          "id",
+          "title",
+          "status",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^DEC-[a-f0-9]{8,12}$"},
-          "title": {"type": "string"},
-          "status": {"enum": ["PROPOSED", "APPROVED", "REJECTED", "SUPERSEDED"]},
-          "owner": {"type": "string"},
-          "revision": {"type": "integer"},
-          "updated_at": {"type": "string"}
+          "id": {
+            "type": "string",
+            "pattern": "^DEC-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PROPOSED",
+              "APPROVED",
+              "REJECTED",
+              "SUPERSEDED"
+            ]
+          },
+          "owner": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          }
         }
       }
     },
@@ -72,12 +181,42 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "title", "status", "revision"],
+        "required": [
+          "id",
+          "title",
+          "status",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^REQ-[a-f0-9]{8,12}$"},
-          "title": {"type": "string"},
-          "status": {"enum": ["DRAFT", "ACTIVE", "DEFERRED", "OBSOLETE"]},
-          "revision": {"type": "integer"}
+          "id": {
+            "type": "string",
+            "pattern": "^REQ-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "DRAFT",
+              "ACTIVE",
+              "DEFERRED",
+              "OBSOLETE"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -85,18 +224,46 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "base_path", "working_path", "status", "revision", "content_hash"],
+        "required": [
+          "id",
+          "base_path",
+          "working_path",
+          "status",
+          "revision",
+          "content_hash"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^ART-[a-f0-9]{8,12}$"},
-          "base_path": {"type": "string"},
-          "working_path": {"type": "string"},
-          "status": {"enum": ["DRAFT", "PUBLISHED", "DEPRECATED"]},
-          "revision": {"type": "integer"},
-          "content_hash": {"type": "string"},
-          "lock_owner": {"type": "string"},
+          "id": {
+            "type": "string",
+            "pattern": "^ART-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "base_path": {
+            "type": "string"
+          },
+          "working_path": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "DRAFT",
+              "PUBLISHED",
+              "DEPRECATED"
+            ]
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "lock_owner": {
+            "type": "string"
+          },
           "provenance": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           }
         }
       }
@@ -105,12 +272,44 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "title", "status", "revision"],
+        "required": [
+          "id",
+          "title",
+          "status",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^TSK-[a-f0-9]{8,12}$"},
-          "title": {"type": "string"},
-          "status": {"enum": ["BACKLOG", "READY", "IN_PROGRESS", "REVIEW", "DONE", "BLOCKED"]},
-          "revision": {"type": "integer"}
+          "id": {
+            "type": "string",
+            "pattern": "^TSK-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "BACKLOG",
+              "READY",
+              "IN_PROGRESS",
+              "REVIEW",
+              "DONE",
+              "BLOCKED"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -118,12 +317,45 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "from", "to", "type"],
+        "required": [
+          "id",
+          "from",
+          "to",
+          "type",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^DEP-[a-f0-9]{8,12}$"},
-          "from": {"type": "string"},
-          "to": {"type": "string"},
-          "type": {"enum": ["BLOCKS", "REQUIRES", "RELATES_TO"]}
+          "id": {
+            "type": "string",
+            "pattern": "^DEP-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "BLOCKS",
+              "REQUIRES",
+              "RELATES_TO"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -131,11 +363,66 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "name", "status"],
+        "$comment": "Only id, name and status are required: every gate recorded before the record was widened carries exactly those three, and `validate` re-verifies evidence only where a digest was actually stored (B5).",
+        "required": [
+          "id",
+          "name",
+          "status"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^GAT-[a-f0-9]{8,12}$"},
-          "name": {"type": "string"},
-          "status": {"enum": ["PENDING", "PASSED", "WARN", "BLOCKED", "NOT_APPLICABLE"]}
+          "id": {
+            "type": "string",
+            "pattern": "^GAT-[a-f0-9]{8,12}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "PASSED",
+              "WARN",
+              "BLOCKED",
+              "NOT_APPLICABLE"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "evidence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "evidence_sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "consequence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "source_history": {
+            "$ref": "#/$defs/source_history"
+          }
         }
       }
     },
@@ -143,12 +430,51 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "title", "severity", "status"],
+        "required": [
+          "id",
+          "title",
+          "severity",
+          "status",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^RSK-[a-f0-9]{8,12}$"},
-          "title": {"type": "string"},
-          "severity": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
-          "status": {"enum": ["IDENTIFIED", "MITIGATED", "ACCEPTED", "REALIZED"]}
+          "id": {
+            "type": "string",
+            "pattern": "^RSK-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "LOW",
+              "MEDIUM",
+              "HIGH",
+              "CRITICAL"
+            ]
+          },
+          "status": {
+            "enum": [
+              "IDENTIFIED",
+              "MITIGATED",
+              "ACCEPTED",
+              "REALIZED"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -156,11 +482,38 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "path", "sha256"],
+        "required": [
+          "id",
+          "path",
+          "sha256",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^EVD-[a-f0-9]{8,12}$"},
-          "path": {"type": "string"},
-          "sha256": {"type": "string"}
+          "id": {
+            "type": "string",
+            "pattern": "^EVD-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -168,11 +521,41 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "name", "status"],
+        "required": [
+          "id",
+          "name",
+          "status",
+          "owner",
+          "revision",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^AGT-[a-f0-9]{8,12}$"},
-          "name": {"type": "string"},
-          "status": {"enum": ["PROPOSED", "ACTIVE", "RETIRED"]}
+          "id": {
+            "type": "string",
+            "pattern": "^AGT-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PROPOSED",
+              "ACTIVE",
+              "RETIRED"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -180,11 +563,26 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "type", "status"],
+        "required": [
+          "id",
+          "type",
+          "status"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^OP-[a-f0-9]{8,12}$"},
-          "type": {"type": "string"},
-          "status": {"enum": ["PENDING", "SUCCESS", "FAILED"]}
+          "id": {
+            "type": "string",
+            "pattern": "^OP-[a-f0-9]{8,12}$"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PENDING",
+              "SUCCESS",
+              "FAILED"
+            ]
+          }
         }
       }
     },
@@ -192,36 +590,561 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "name", "created_at"],
+        "required": [
+          "id",
+          "name",
+          "owner",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^CHK-[a-f0-9]{8,12}$"},
-          "name": {"type": "string"},
-          "created_at": {"type": "string"}
+          "id": {
+            "type": "string",
+            "pattern": "^CHK-[A-Z0-9][A-Z0-9_-]{0,63}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "minLength": 1
+          },
+          "updated_at": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
-
-    "blockers": {"type": "array"},
+    "blockers": {
+      "type": "array"
+    },
+    "progress_forecast": {
+      "$ref": "#/$defs/progress_forecast",
+      "$comment": "D5/FR-024. The current forecast. NOT required: a project that has never recorded one is a valid project, and both ALN-005 pilots are exactly that. An absent forecast means nothing was recorded — it is never a zero, a default or an empty range, because a measurement nobody made is the failure this requirement exists to prevent."
+    },
+    "forecast_history": {
+      "type": "array",
+      "$comment": "Every previous forecast, oldest first. Written by `beave forecast`; `migrate` creates it empty so a migrated project has somewhere to put its first one. Also not required, for the same reason.",
+      "items": {
+        "$ref": "#/$defs/progress_forecast"
+      }
+    },
     "human_overrides": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "status", "owner", "source", "source_sha256", "created_at"],
+        "required": [
+          "id",
+          "status",
+          "owner",
+          "source",
+          "source_sha256",
+          "created_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^OVR-[a-f0-9]{12}$"},
-          "status": {"enum": ["OPEN", "RECONCILED"]},
-          "owner": {"type": "string", "minLength": 1},
-          "source": {"type": "string", "minLength": 1},
-          "source_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "created_at": {"type": "string"}
+          "id": {
+            "type": "string",
+            "pattern": "^OVR-[a-f0-9]{12}$"
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "RECONCILED"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "reconciled_by": {
+            "type": "string"
+          },
+          "reconciled_at": {
+            "type": "string"
+          },
+          "reconciliation_evidence": {
+            "type": "string"
+          },
+          "reconciliation_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_history": {
+            "$ref": "#/$defs/source_history"
+          }
         }
       }
     },
-    "needs_reconciliation": {"type": "boolean"},
-    "revision": {"type": "integer", "minimum": 1},
-    "last_event_id": {"type": "string", "minLength": 1},
-    "exact_next_action": {"type": "string", "minLength": 1},
-    "created_at": {"type": "string"},
-    "updated_at": {"type": "string"}
+    "needs_reconciliation": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "last_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "exact_next_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string"
+    },
+    "interview_log": {
+      "type": "array",
+      "description": "The interview ledger, in the order the interactions happened. Absent on a project created before the ledger existed, which is a different fact from an empty ledger: absent means nothing was recorded, empty means recording is on and nothing has been asked yet.",
+      "items": {
+        "type": "object",
+        "description": "One recorded interaction: a question Beave put, the answer it received, and what it did with that answer. Appended, never rewritten: a correction adds an entry that supersedes this one and this one stays.",
+        "required": [
+          "id",
+          "status",
+          "question",
+          "rationale",
+          "owner",
+          "consequences",
+          "documents",
+          "open_points",
+          "consequences_recorded_at",
+          "reconstructed",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^QNA-[0-9]{4,}$"
+          },
+          "status": {
+            "enum": [
+              "PLANNED",
+              "ASKED",
+              "ANSWERED",
+              "DEFERRED",
+              "SKIPPED",
+              "SUPERSEDED",
+              "INVALIDATED"
+            ],
+            "description": "The lifecycle of the question. Whether its answer has been applied to the project records is not a status: it is consequences_recorded_at."
+          },
+          "module": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "lifecycle_state": {
+            "type": "string"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asked_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answer": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answered_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "interpretation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reply": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consequences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "open_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "consequences_recorded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set only when the answer has been applied to the project records. Null on an answered question means the work is not finished, which is what Resume has to be able to see."
+          },
+          "next_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_question": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "supersedes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "superseded_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reconstructed": {
+            "type": "boolean",
+            "description": "True only for an entry rebuilt from durable evidence. A decision in a document is not proof that a particular question was asked."
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "interview_log_since": {
+      "type": "string",
+      "description": "When recording began. Interactions before this instant were never recorded and are not reconstructed."
+    },
+    "interview_view": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Digest of QUESTION_ANSWER_HISTORY.md, the derived rendering of this ledger. The history is this state; the document is regenerated from it, and a mismatch means the document was edited by hand.",
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "const": "QUESTION_ANSWER_HISTORY.md"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "forecast_range": {
+      "type": "object",
+      "$comment": "A quantity of observable things — questions, operations, cycles. `min === max` means the quantity is KNOWN, not that it was guessed precisely. There is no percentage anywhere in this schema on purpose: a percentage whose denominator can still change is presented as a fact and is not one.",
+      "required": [
+        "min",
+        "max"
+      ],
+      "properties": {
+        "min": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "progress_forecast": {
+      "type": "object",
+      "$comment": "One recorded forecast. `derived` and `signals` are filled by the engine from the ledgers and from recorded history; no command option writes either, so the caller describes the work and the engine counts what it can already see.",
+      "required": [
+        "phase",
+        "known_work",
+        "conditional_work",
+        "questions",
+        "operations",
+        "cycles",
+        "confidence",
+        "confidence_reason",
+        "cycle_state",
+        "change_reason",
+        "recorded_by",
+        "recorded_at",
+        "state_revision",
+        "derived",
+        "signals"
+      ],
+      "properties": {
+        "phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "known_work": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conditional_work": {
+          "type": "string",
+          "minLength": 1
+        },
+        "questions": {
+          "$ref": "#/$defs/forecast_range"
+        },
+        "operations": {
+          "$ref": "#/$defs/forecast_range"
+        },
+        "cycles": {
+          "$ref": "#/$defs/forecast_range"
+        },
+        "confidence": {
+          "enum": [
+            "ALTA",
+            "MEDIA",
+            "BASSA"
+          ]
+        },
+        "confidence_reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cycle_state": {
+          "enum": [
+            "REGOLARE",
+            "IN_ESPANSIONE",
+            "RISCHIO_LOOP",
+            "BLOCCATO"
+          ]
+        },
+        "change_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "$comment": "The cause of the change. `null` only on the first forecast a project ever records; `beave forecast` refuses a later one without it."
+        },
+        "recorded_by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recorded_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "derived": {
+          "type": "object",
+          "$comment": "Counted by the engine from the ledgers at the moment of recording. `status_history_events` is how many ledger events in the project recorded the status of the record they changed: it is 0 for every project written before ALN-008, and when it is 0 the reopening signal cannot be derived at all, so its absence must be read as 'not observable here' and not as 'did not happen'.",
+          "required": [
+            "open_blockers",
+            "open_overrides",
+            "tasks_by_status",
+            "gates_remaining",
+            "unresolved_modules"
+          ],
+          "properties": {
+            "open_blockers": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "open_overrides": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "tasks_by_status": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "gates_remaining": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unresolved_modules": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "open_findings": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "evidence_records": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "status_history_events": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "signals": {
+          "type": "array",
+          "$comment": "The D5 conditions the engine observed for itself. `implies_cycle_state` is advisory: nothing ever writes it into `cycle_state`, because the engine does not overwrite a person's judgement — it names the disagreement instead.",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "implies_cycle_state",
+              "observed",
+              "detail"
+            ],
+            "properties": {
+              "code": {
+                "enum": [
+                  "RESIDUAL_GREW_WITHOUT_PHASE_CLOSING",
+                  "SAME_PHASE_WIDER_RANGE",
+                  "DEFECT_FAMILY_REOPENED_AFTER_TWO_CYCLES",
+                  "OPERATIONS_WITHOUT_A_FALL_IN_BLOCKERS_OR_FINDINGS"
+                ]
+              },
+              "implies_cycle_state": {
+                "enum": [
+                  "REGOLARE",
+                  "IN_ESPANSIONE",
+                  "RISCHIO_LOOP",
+                  "BLOCCATO"
+                ]
+              },
+              "observed": {
+                "type": "string",
+                "minLength": 1
+              },
+              "detail": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "source_history": {
+      "type": "array",
+      "$comment": "Written by `beave re-record` (OD-012). One entry per supersession of the file a record stands on. `path` and `sha256` are null when the record carried nothing before — a gate older than the rule that gave gates an evidence digest — which is a different fact from the previous digest having matched, and the two must not look alike.",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256",
+          "superseded_at",
+          "superseded_by",
+          "reason",
+          "event_id"
+        ],
+        "properties": {
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "superseded_at": {
+            "type": "string"
+          },
+          "superseded_by": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
   }
 }

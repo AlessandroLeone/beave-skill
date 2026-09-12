@@ -2,7 +2,7 @@
 
 Persist one current state and one exact next gate. Never skip a state merely because later work appears obvious.
 
-Beave designs this complete lifecycle and prepares the documents, prompts, ledgers, gates, and evidence rules needed to run it. Its initialization session does not execute the user's project or instantiate the project-agent system. A later AI runtime follows the prepared artifacts; Beave may be invoked again for Resume, audit, or evolution.
+Beave prepares the documents, prompts, ledgers, gates and evidence rules for this lifecycle. Initialization does not execute the project or launch its agents. The same agent or another runtime follows the prepared artifacts once execution is authorized; Beave may be invoked again for Resume, audit or evolution.
 
 ## 1. INTAKE
 
@@ -30,7 +30,7 @@ Create the approved source hierarchy, state system, environment pins, safe confi
 
 ## 7. PLAN
 
-Convert the next milestone into context-sized tasks. Every task names objective, requirement IDs, exact scope, files or bounded context, dependencies, acceptance evidence, reviewer, and rollback considerations. Analyze dependency edges and form sequential or parallel waves. Exit after plan review.
+Plan the whole agreed outcome under EXEC-001 and decompose currently definable work into executable tasks. Each names objective, requirement IDs, authoritative inputs, scope, dependencies, resources, responsibility, output, acceptance, reviewer, recovery and completion. Future-dependent detail requires resolution work, prerequisites, owner, acceptance and a gate before dependent work. Analyze dependency order and concurrency. Exit after plan review and COV-001 scoped readiness assessment; the next milestone alone is not the complete project system.
 
 ## 8. EXECUTE
 
@@ -53,6 +53,8 @@ Monitor outcomes, incidents, costs, quality, user feedback, dependencies, securi
 - A human gate is a real pause, not a sentence followed by automatic continuation.
 - `BLOCKED` states identify the decision owner and exact unblock condition.
 - `WARN` requires an owner, consequence, and review date.
-- A failed gate returns to the earliest state whose assumption or artifact is invalid.
+- A failed gate returns to the earliest state whose assumption or artifact is invalid, and the return is a forecast change with a stated cause, not a silent re-plan.
+- Restate the operational forecast at every transition and every substantial update, with what changed since the previous one and why ([interview-protocol.md](interview-protocol.md)). A phase that closes without one leaves the next agent guessing at what the plan could not see.
+- No step is announced as the last while a verification able to open new work is still outstanding. A pending gate is such a verification.
 - Maximum automatic repair attempts must be defined before execution; exhaustion escalates.
 - Resume begins by reading durable state and verifying it against the workspace, not by replaying the whole chat.

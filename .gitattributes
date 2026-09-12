@@ -1,0 +1,13 @@
+# The bytes in this repository are the bytes of the release.
+#
+# `npm pack` hashes file contents, and the release is pinned by that hash. With
+# git's line-ending conversion left to the client, a clone on a machine where
+# `core.autocrlf=true` — the Windows default, and the setting on the machine this
+# was packed from — would check out CRLF where the repository stores LF, and
+# every text file in the package would differ. The published SHA-256 would then
+# be unreproducible from its own source, which is the one thing a pinned hash is
+# for.
+#
+# `-text` means: never convert, in either direction. What was committed is what
+# is checked out, on every platform.
+* -text

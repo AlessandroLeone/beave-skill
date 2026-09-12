@@ -1,5 +1,6 @@
 import { test, describe, it } from "node:test";
 import assert from "node:assert";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,11 @@ import { spawnSync } from "node:child_process";
 const CLI = path.resolve("lib/bin/beave.js");
 
 function runCli(args, cwd) {
+  if (["doc-save","doc-mark-deletion","doc-restore","doc-finalize"].includes(args[0]) && !args.includes("--operation-id")) args = [...args, "--operation-id", `OP-${crypto.randomUUID()}`];
+  if (args[0] === "doc-save" && !args.includes("--confirm-token")) {
+    const preview = spawnSync(process.execPath, [CLI, "doc-diff", ...args.slice(1)], { cwd, encoding: "utf8" });
+    if (preview.status === 0) args = [...args, "--confirm-token", JSON.parse(preview.stdout).confirmation_token];
+  }
   const result = spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: "utf8" });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -16,7 +22,7 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
   it("saves a document, progressing -vN suffix and backing up history", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-1-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
-    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json"], root);
+    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-save"], root);
     
     fs.writeFileSync(path.join(root, "content-v1.txt"), "hello v1");
     let res = runCli(["doc-save", "--project-root", ".", "--id", "ART-00000000", "--base-path", "docs/design.md", "--content-file", "content-v1.txt", "--owner", "A"], root);
@@ -39,7 +45,7 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
   it("detects external edits and prevents silent overwrites", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-2-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
-    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json"], root);
+    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-drift"], root);
     
     fs.writeFileSync(path.join(root, "content-v1.txt"), "hello v1");
     runCli(["doc-save", "--project-root", ".", "--id", "ART-00000000", "--base-path", "docs/design.md", "--content-file", "content-v1.txt", "--owner", "A"], root);
@@ -57,7 +63,7 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
   it("finalizes a document and drops the -vN suffix", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-3-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
-    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json"], root);
+    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-finalize"], root);
     
     fs.writeFileSync(path.join(root, "content-v1.txt"), "hello final");
     runCli(["doc-save", "--project-root", ".", "--id", "ART-00000000", "--base-path", "docs/design.md", "--content-file", "content-v1.txt", "--owner", "A"], root);
@@ -75,7 +81,7 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
   it("restores a document from history as a new revision", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-4-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
-    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json"], root);
+    runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-restore"], root);
     
     fs.writeFileSync(path.join(root, "content-v1.txt"), "hello v1");
     runCli(["doc-save", "--project-root", ".", "--id", "ART-00000000", "--base-path", "docs/design.md", "--content-file", "content-v1.txt", "--owner", "A"], root);

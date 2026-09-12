@@ -2,7 +2,7 @@
 
 This reference describes a future agent system that Beave may recommend and write into the initialized project. Beave's own procedure uses one host AI model in conversation with the user. It does not spawn, execute, or orchestrate these project agents.
 
-Design the future organization as carefully as the project itself. Multiple agents are an option, not a success metric. The output is a reviewed package of prompts, roles, permissions, dependencies, contracts, handoffs, and execution instructions for a later AI session.
+Design the organization as carefully as the project. Multiple agents are optional. The output is reviewed prompts, roles, permissions, dependencies, contracts, handoffs and execution instructions for the same agent or another runtime after initialization and within authorization.
 
 ## Topology selection
 
@@ -97,6 +97,8 @@ Ask which models and effort levels the runtime supports. Route by risk:
 Record cost, latency, context, and privacy consequences. Never pass a logical effort label to a runtime that does not support it.
 
 ## Worker prompt artifact
+
+Role prompts accompany actual EXEC-001 work definitions; a few generic prompts do not define the project. Include dependency eligibility, claims, integration, evidence-based advancement, bounded retries and terminal conditions required by the executor. Human organizations and physical actors retain responsibilities where agents cannot perform the work.
 
 ```markdown
 # Work item: [ID — outcome]

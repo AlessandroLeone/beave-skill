@@ -1,95 +1,36 @@
 # Beave
 
-Beave is a human-governed project operating system for AI-assisted work. One configured host AI collaborates with the user through an adaptive semantic skill and a deterministic local CLI, then produces the complete documents, plans, gates, memory, and optional multi-agent prompt system required to execute the project later.
+Beave prepares a complete multidisciplinary project folder: specifications, decisions, resources, execution strategy, agents where useful, tasks, verification, recovery and completion conditions. It asks all necessary questions without a total question or document cap.
 
-Current design baseline: `0.2.0-alpha.1`. The local alpha is an implementation precursor and is **not safe or authorized for npm publication yet**; see the implementation handoff for known gaps.
+## Semantic and programmatic use
 
-## Two ways to use Beave
+- **Semantic-only:** provide the Markdown skill and references or Portable Edition. The host AI produces the complete project through approved file tools or manual delivery. No Beave CLI, npm, executable, Git repository or Studio is required.
+- **Hybrid:** the same semantic method plus the TypeScript/Node CLI for supported deterministic persistence, validation, versions and Resume. Completeness requirements are identical; mechanical guarantees differ.
 
-- **Hybrid:** recommended for projects spanning sessions, agents, contracts, or safety gates. The AI handles meaning and recommendations; the TypeScript/Node CLI is the canonical target for state, ledgers, document versions, gates, context, exports, recovery, and human overrides.
-- **Semantic-only:** copy `dist/beave-portable.md` or install only `skills/beave`. No library is required, but state consistency and resume are manual.
+A repository distributes/develops Beave; npm/npx and a verified CLI executable distribute its programmatic capability. Installing the skill only makes its instructions discoverable. None of these supplies an AI model. The user's output folder need not be a software or npm project. Studio's optional desktop executable is separate from the CLI.
 
-## Interaction modes
+## Current alpha
 
-- **Guided:** one question at a time, with explanations.
-- **Standard:** balanced flow, up to two related questions. Default.
-- **Expert:** deepest applicable investigation, edge-case challenges, and stronger evidence.
+Version 0.2.0-alpha.3 remains an alpha, not a release-readiness claim. The CLI target is Node 24 without mandatory third-party runtime dependencies. Verify actual package/executable availability and host support before installation. Source code and build scripts do not prove a published package or supported native artifact exists.
 
-Question limits are per conversational turn, not per project. Beave keeps asking until every applicable area is confirmed or visibly deferred, even when that requires a long interview.
+The CLI exposes installation, Portable/adapters, typed ledgers, structural gate prerequisites, governed document operations and digest-verified project handoff. Project-state mutations use caller operation IDs; document saves require the token returned by their reviewed preview, and interrupted file operations are recovered from a local journal. Structural success never certifies semantic completeness; read the engine guide before relying on a check.
 
-## Operating boundary
+## Start
 
-Beave does not spawn or execute a project's future agents. It decides with the user whether agents are useful, proposes their roles and relationships, and writes their prompts, permissions, dependencies, handoffs, and operating procedure into the project. A later AI session reads those artifacts and executes the prepared project.
-
-These are separate from project modes such as `Genesis`, `Adoption`, `Reconstruction`, `Evolution`, and `Resume`.
-
-## Local Get Started
-
-```powershell
-npm install
-npm test
-node bin/beave.mjs capabilities
-```
-
-Try the executable without a global install:
-
-```powershell
-npm exec -- beave capabilities
-```
-
-Create the package tarball and inspect its contents:
-
-```powershell
-npm pack --dry-run
-```
-
-Optional global development install, only when you explicitly want to change the machine:
-
-```powershell
-npm install --global C:\wamp64\www\beavelab
-beave capabilities
-npm config get prefix
-```
-
-On Windows, the prefix directory contains `beave.cmd` and must be on `PATH`.
-
-After an authorized public implementation and publication, the intended commands are:
-
-```powershell
-npx @beavelab/beave@latest capabilities
-npm install --global @beavelab/beave
-beave resume --project-root C:\path\to\project
-```
-
-## Install the skill for an AI host
-
-Preview before writing:
-
-```powershell
-beave install --target all --scope project --project-root C:\path\to\project --dry-run
-```
-
-Then remove `--dry-run` after reviewing the exact destinations. Codex and Gemini share `.agents/skills/beave`; Claude uses `.claude/skills/beave`.
+Provide the skill/references or Portable Edition to the chosen host. Establish missing authority and persistence, inspect existing material and follow coverage through the complete agreed outcome. After initialization the same agent or a fresh execution system may proceed when authorized. Studio, board review and a model change are optional.
 
 ## Documentation
 
-- [Documentation index](docs/00_DOCUMENTATION_INDEX.md)
-- [Approved blueprint](docs/PROJECT_BLUEPRINT.md)
-- [Requirements](docs/REQUIREMENTS.md)
-- [User guide](docs/USER_GUIDE.md)
-- [Runtime guide](docs/RUNTIME_GUIDE.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Data and safety](docs/DATA_AND_SAFETY.md)
-- [Quality and acceptance](docs/QUALITY_AND_ACCEPTANCE.md)
-- [Delivery and governance](docs/DELIVERY_AND_GOVERNANCE.md)
-- [Implementation handoff](docs/IMPLEMENTATION_HANDOFF.md)
-- [Open decisions](docs/OPEN_DECISIONS.md)
-- [RexLab Resume pilot](docs/REXLAB_PILOT.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Versioning](docs/VERSIONING.md)
-- [Windows install and PATH](docs/WINDOWS_INSTALL.md)
-- [Website](site/index.html)
+- [Semantic entry point](skills/beave/SKILL.md)
+- [User guide](skills/beave/references/user-guide.md)
+- [Coverage contract](skills/beave/references/coverage-contract.md)
+- [Execution package](skills/beave/references/execution-package.md)
+- [Engine capabilities and limits](skills/beave/references/engine-contract.md)
+- [Runtime and distribution](skills/beave/references/runtime-compatibility.md)
+- [Behavioral evaluation scenarios](tests/scenarios/complete-project-preparation.md)
 
-## Repository policy
+## Ownership and boundaries
 
-Public skill/core/CLI sources belong in `AlessandroLeone/beave-skill` under Apache-2.0. Website and Studio/Tauri sources remain in private `AlessandroLeone/beavelab`; signed freeware Desktop downloads are distributed through `beavelab.it`. No package publication, Git push, website deployment, signing, or external connector is performed automatically. BeaveLab remains release authority and the user can change direction by prompt; Beave records the override and reconciles downstream impact.
+Public skill/core/CLI sources are Apache-2.0. Website and Studio source remain private. Base Studio reads, edits and visualizes project files; assisted review, linked-file change impact and reconciliation are future optional subscription features. Semantic/CLI handling of corrections remains free.
+
+Beave initialization prepares the future execution system and does not launch its agents. Publication, push, deployment, spending and external connections require their own authority.

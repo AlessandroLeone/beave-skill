@@ -6,6 +6,8 @@ Apply a decision-value test before every question. Ask the user only when the an
 
 ## 0. Collaboration contract
 
+Use [coverage-contract.md](coverage-contract.md) to track concerns beneath and beyond these modules. The catalog does not define the project's outer boundary. Survey all relevant disciplines before detailed design.
+
 - Which interaction mode and explanation depth does the user prefer?
 - Who decides product, architecture, budget, security, legal, and release questions?
 - Which actions may the agent take without asking, and which always require approval?
@@ -40,6 +42,8 @@ Apply a decision-value test before every question. Ask the user only when the an
 
 ### Type-specific branches
 
+For non-software work, describe the setting in its own terms: site, workshop, supply chain, organization, event, service or physical environment. Do not force it into an app/platform category.
+
 For web/SaaS ask about tenancy, auth, billing, browser support, SEO, administration, and availability.  
 For desktop/mobile ask about OS/device matrix, permissions, distribution, updates, local data, offline behavior, and app-store rules.  
 For API/CLI/SDK ask about consumers, compatibility, versioning, errors, rate limits, discoverability, and examples.  
@@ -49,6 +53,14 @@ For embedded/IoT ask about hardware, power, connectivity, safety, firmware updat
 For content/design ask about audience, formats, brand system, approval, localization, rights, accessibility, and publishing channels.
 
 ## 4. Scope, capabilities, and priorities
+
+Extend the earlier type-specific investigation where applicable:
+
+- Physical infrastructure/construction: existing conditions and surveys, design disciplines/interfaces, site/access constraints, materials, equipment, suppliers, sequence, inspections, commissioning and maintenance. Identify responsible professionals and approvals; never invent measurements or treat AI prose as certified engineering evidence.
+- Manufactured products: specifications/tolerances, prototypes, materials/components, sourcing and lead times, tooling, assembly, capacity, quality inspection, logistics, repair and disposal.
+- Organizational/service projects: roles, procedures, staffing/capacity, training, stakeholder adoption, suppliers, continuity, quality, rollout and ongoing ownership.
+
+These are starting lenses, not exhaustive domain checklists. Add disciplines and interfaces exposed by the project; each applicable obligation needs an owner, output and acceptance.
 
 - What must a user be able to accomplish end to end?
 - Which capability is the smallest useful first release?
@@ -161,14 +173,16 @@ For content/design ask about audience, formats, brand system, approval, localiza
 
 ## 15. Planning, milestones, risks, and success
 
-- What is the first milestone outcome, not merely its activity list?
+- What is the complete agreed outcome and its terminal acceptance? What phases, including the first milestone, are needed to reach it?
 - Which requirements, decisions, dependencies, experiments, and risks precede it?
 - What phase granularity fits the project and the agent context limits?
 - Which tasks are independent, sequential, contract-first, or human-gated?
 - What are the top technical, product, operational, schedule, people, vendor, and adoption risks?
 - What leading indicators reveal failure early?
 - What are the kill, pivot, pause, and success criteria?
-- What exact evidence closes the first milestone and authorizes the next?
+- What evidence closes each stage, authorizes dependent work and proves the agreed result complete?
+- Which later details genuinely depend on future evidence, and what resolution work, owner and blocking point will settle them?
+- What inputs, resources, responsibilities, outputs, verification, recovery and escalation does each executable work item require?
 
 ## 16. Final blueprint review
 

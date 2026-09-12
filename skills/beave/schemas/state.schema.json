@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://beavelab.it/schemas/beave-state-v2.json",
-  "title": "Beave project state",
+  "title": "Beave project state (schema v2 — historical)",
+  "description": "HISTORICAL. This is the v2 schema, kept so that projects written before schema v3 can be read and migrated: `beave migrate` still accepts `schema_version` 1 and 2. It is not the current schema and nothing should be validated against it. The current one is `state-v3.schema.json` in this directory.",
   "type": "object",
   "required": [
     "schema_version",
@@ -21,73 +22,209 @@
     "updated_at"
   ],
   "properties": {
-    "schema_version": {"const": 2},
-    "beave_version": {"type": "string"},
+    "schema_version": {
+      "const": 2
+    },
+    "beave_version": {
+      "type": "string"
+    },
     "project": {
       "type": "object",
-      "required": ["name", "root", "mode"],
+      "required": [
+        "name",
+        "root",
+        "mode"
+      ],
       "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "root": {"type": "string", "minLength": 1},
-        "mode": {"enum": ["Genesis", "Adoption", "Reconstruction", "Evolution", "Resume"]}
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "Genesis",
+            "Adoption",
+            "Reconstruction",
+            "Evolution",
+            "Resume"
+          ]
+        }
       },
       "additionalProperties": false
     },
-    "interaction_mode": {"enum": ["Guided", "Standard", "Expert"]},
-    "intake_strategy": {"enum": ["Adaptive", "Brief-led"]},
+    "interaction_mode": {
+      "enum": [
+        "Guided",
+        "Standard",
+        "Expert"
+      ]
+    },
+    "intake_strategy": {
+      "enum": [
+        "Adaptive",
+        "Brief-led"
+      ]
+    },
     "decision_owners": {
       "type": "object",
-      "required": ["product", "technical", "budget", "safety", "release"],
+      "required": [
+        "product",
+        "technical",
+        "budget",
+        "safety",
+        "release"
+      ],
       "properties": {
-        "product": {"type": "string", "minLength": 1},
-        "technical": {"type": "string", "minLength": 1},
-        "budget": {"type": "string", "minLength": 1},
-        "safety": {"type": "string", "minLength": 1},
-        "release": {"type": "string", "minLength": 1}
+        "product": {
+          "type": "string",
+          "minLength": 1
+        },
+        "technical": {
+          "type": "string",
+          "minLength": 1
+        },
+        "budget": {
+          "type": "string",
+          "minLength": 1
+        },
+        "safety": {
+          "type": "string",
+          "minLength": 1
+        },
+        "release": {
+          "type": "string",
+          "minLength": 1
+        }
       },
       "additionalProperties": false
     },
     "lifecycle_state": {
-      "enum": ["INTAKE", "DISCOVERY", "INTERVIEW", "RESEARCH", "BLUEPRINT", "FOUNDATION", "PLAN", "EXECUTE", "VERIFY", "RELEASE", "OPERATE"]
+      "enum": [
+        "INTAKE",
+        "DISCOVERY",
+        "INTERVIEW",
+        "RESEARCH",
+        "BLUEPRINT",
+        "FOUNDATION",
+        "PLAN",
+        "EXECUTE",
+        "VERIFY",
+        "RELEASE",
+        "OPERATE"
+      ]
     },
-    "current_gate": {"type": "string", "pattern": "^G([0-9]|1[0-2])$"},
+    "current_gate": {
+      "type": "string",
+      "pattern": "^G([0-9]|1[0-2])$"
+    },
     "modules": {
       "type": "array",
       "minItems": 17,
       "maxItems": 17,
       "items": {
         "type": "object",
-        "required": ["id", "title", "status"],
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
         "properties": {
-          "id": {"type": "integer", "minimum": 0, "maximum": 16},
-          "title": {"type": "string"},
-          "status": {"enum": ["NOT STARTED", "IN DISCUSSION", "CONFIRMED", "PARTIAL", "DEFERRED", "NOT APPLICABLE", "BLOCKED"]}
+          "id": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "NOT STARTED",
+              "IN DISCUSSION",
+              "CONFIRMED",
+              "PARTIAL",
+              "DEFERRED",
+              "NOT APPLICABLE",
+              "BLOCKED"
+            ]
+          }
         }
       }
     },
-    "blockers": {"type": "array"},
-    "risks": {"type": "array"},
-    "evidence": {"type": "array"},
+    "blockers": {
+      "type": "array"
+    },
+    "risks": {
+      "type": "array"
+    },
+    "evidence": {
+      "type": "array"
+    },
     "human_overrides": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "status", "owner", "source", "source_sha256", "created_at"],
+        "required": [
+          "id",
+          "status",
+          "owner",
+          "source",
+          "source_sha256",
+          "created_at"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^OVR-[a-f0-9]{12}$"},
-          "status": {"enum": ["OPEN", "RECONCILED"]},
-          "owner": {"type": "string", "minLength": 1},
-          "source": {"type": "string", "minLength": 1},
-          "source_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-          "created_at": {"type": "string"}
+          "id": {
+            "type": "string",
+            "pattern": "^OVR-[a-f0-9]{12}$"
+          },
+          "status": {
+            "enum": [
+              "OPEN",
+              "RECONCILED"
+            ]
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "created_at": {
+            "type": "string"
+          }
         }
       }
     },
-    "needs_reconciliation": {"type": "boolean"},
-    "revision": {"type": "integer", "minimum": 1},
-    "last_event_id": {"type": "string", "minLength": 1},
-    "exact_next_action": {"type": "string", "minLength": 1},
-    "created_at": {"type": "string"},
-    "updated_at": {"type": "string"}
+    "needs_reconciliation": {
+      "type": "boolean"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "last_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "exact_next_action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "updated_at": {
+      "type": "string"
+    }
   }
 }

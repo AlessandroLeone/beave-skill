@@ -1,46 +1,33 @@
 # Runtime Compatibility
 
-Design support by agent runtime, not by model name. Models change more often than their host's skill, filesystem, permission, and process interfaces.
+Match the workflow to observed host capabilities, not a model name. One canonical semantic method serves all hosts and both profiles. Adapters change discovery paths and metadata, not coverage or dossier requirements.
 
-## Supported runtime profiles
+## Distribution versus operation
 
-| Runtime | Native location | Hybrid engine | Distribution |
-|---|---|---|---|
-| OpenAI Codex local | `.agents/skills/beave/` | full when shell and project files are available | repository/user skill; later OpenAI plugin |
-| ChatGPT surfaces | installed skill/plugin where supported | conditional; local project state is not assumed | semantic skill or plugin; portable fallback |
-| Claude Code | `.claude/skills/beave/` | full when the Beave CLI and file permissions are available | Claude skill/plugin adapter |
-| Gemini CLI | `.agents/skills/beave/` or `.gemini/skills/beave/` | full after activation consent and shell/file permission | Git/`.skill`/extension adapter |
-| Antigravity / AGY | workspace skill loaded with the approved project context | full when the local command is permitted | workspace adapter |
-| Other AI systems | attach or paste `beave-portable.md` | unavailable unless the host can call the CLI | one self-contained Markdown file |
+- Markdown skill/references or Portable Edition work without the CLI for any project size.
+- Skill installation makes instructions discoverable; it does not activate programmatic state management.
+- npm/npx or a verified standalone CLI supplies mechanics. Source checkout requires a compatible build/runtime. None supplies a reasoning model.
+- A repository distributes or develops Beave; the user's project need not use Git or npm.
+- Studio is a separate optional desktop reader/editor, not the CLI executable.
 
-The same canonical semantic content serves every runtime. Exporters adapt paths, metadata, invocation syntax, and declared capabilities; they must not fork the workflow or questionnaire.
+## Current exporter conventions
+
+| Target | Generated location |
+|---|---|
+| codex | .agents/skills/beave/ |
+| claude | .claude/skills/beave/ |
+| gemini | .agents/skills/beave/ |
+| agy | .agents/skills/beave/ |
+| portable | beave-portable.md in the chosen output directory |
+
+These are observed exporter paths, not proof every host/version discovers them. Verify actual discovery before claiming support. Preview destinations and preserve installations. verify-install checks copied content, not model behavior or native capabilities.
 
 ## Capability negotiation
 
-Before selecting Hybrid, verify:
+Before Hybrid verify a compatible CLI, process access, approved project files and supported operations. Node 24 is the target; compatibility and executable availability require release-specific evidence. A build script does not prove an executable exists.
 
-1. a local filesystem and the Beave CLI on Node 24 LTS are available; Node 22 may be accepted only when the current compatibility matrix says so, and Python 3.11+ is a temporary alpha bridge;
-2. the runtime can run a local process and read its concise output;
-3. the user approved the persistence location;
-4. the selected agent has only the permissions needed for the current command;
-5. any future project-agent capabilities referenced in generated prompts exist in the later execution runtime; Beave initialization itself does not invoke them.
+If the CLI is unavailable, use Semantic-only with the same COV-001 and EXEC-001 requirements. Use approved host tools or manual saving and state unavailable transaction guarantees. With no filesystem, provide complete documents for saving and defer folder acceptance until checked. Do not install dependencies or enable services merely to avoid this path.
 
-If any requirement fails, use Semantic-only. Never install dependencies or enable MCP merely to avoid the fallback.
+For execution inspect agents, concurrency, tools, model/effort options and authority. Prompts do not create capabilities. Same-agent continuation and cross-host handoff both recheck prerequisites; neither requires Studio or a board review.
 
-The TypeScript/Node CLI is the only canonical programmatic engine. The bundled Python implementation is frozen as an alpha bridge: do not add independent behavior to it, expose command differences explicitly, and remove it before beta only after saved-state migration and parity evidence.
-
-## Runtime-specific cautions
-
-- Codex and Gemini can share `.agents/skills/beave`; avoid installing a second copy with the same name at a higher-precedence scope.
-- Claude Code uses `.claude/skills/` and has runtime-specific frontmatter and plugin features. Generate its adapter instead of editing the canonical skill.
-- Gemini extension subagents may be preview features. Beave generates future worker briefs without invoking or promising native orchestration.
-- ChatGPT web/cloud cannot be assumed to see a user's local `.beave/` state. Use the portable flow or a separately approved future connector.
-- A model/effort recommendation is advisory until the host confirms that exact option is available.
-
-## Primary documentation
-
-- OpenAI: https://developers.openai.com/codex/skills
-- Anthropic: https://code.claude.com/docs/en/skills
-- Google Gemini CLI: https://geminicli.com/docs/cli/creating-skills/
-
-Verify these sources at release time because runtime behavior is version-sensitive.
+Check current official host documentation when modifying native integrations or releasing adapters. This static guide does not certify provider capabilities.

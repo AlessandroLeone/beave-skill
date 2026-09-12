@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -31,6 +32,7 @@ async function invoke(...args) {
 }
 
 async function run(...args) {
+  if (["record","override","reconcile","decision","requirement","task","dependency","risk","evidence","agent","checkpoint","gate","doc-save","doc-mark-deletion","doc-restore","doc-finalize"].includes(args[0]) && !args.includes("--operation-id")) args = [...args, "--operation-id", `OP-${crypto.randomUUID()}`];
   const result = await invoke(...args);
   assert.equal(result.status, 0, `stdout=${result.stdout}\nstderr=${result.stderr}`);
   return result.stdout;
@@ -39,7 +41,7 @@ async function run(...args) {
 async function initialize(project, mode = "Standard") {
   const owners = path.join(project, "owners.json");
   fs.writeFileSync(owners, JSON.stringify({ product: "User", technical: "User", budget: "User", safety: "User", release: "User" }));
-  await run("init", "--project-root", project, "--project-name", "Fixture", "--project-mode", "Resume", "--interaction-mode", mode, "--owners-file", owners);
+  await run("init", "--project-root", project, "--project-name", "Fixture", "--project-mode", "Resume", "--interaction-mode", mode, "--owners-file", owners, "--operation-id", `OP-init-${mode}`);
 }
 
 test("capabilities are dependency-free", async () => {
@@ -51,14 +53,26 @@ test("capabilities are dependency-free", async () => {
 test("init, resume, override, reconcile and validate", async () => {
   const project = fixture("lifecycle");
   await initialize(project, "Expert");
-  assert.match(await run("resume", "--project-root", project), /Resume questions/);
+  // The heading was renamed after the ALN-005 handoff test: a fresh recipient read
+  // "Resume questions" as the next action and went to interview the user about a
+  // module the dossier had closed. Assert the two things that matter: the recorded
+  // next action is present, and the prompts are labelled as catalog prompts.
+  const resumed = await run("resume", "--project-root", project);
+  assert.match(resumed, /Exact next action:/);
+  assert.match(resumed, /Catalog questions for the active module/);
+  assert.match(resumed, /The recorded exact next action above prevails/);
   const instruction = path.join(project, "override.md");
   fs.writeFileSync(instruction, "Change the target user.");
   const recorded = await run("override", "--project-root", project, "--instruction-file", instruction, "--owner", "User");
   const id = recorded.match(/OVR-[a-f0-9]{12}/)?.[0];
   assert.ok(id);
   assert.equal(JSON.parse(await run("status", "--project-root", project)).needs_reconciliation, true);
-  assert.match(await run("resume", "--project-root", project), /Resume blocked/);
+  // Blocked, and non-zero while saying so: a caller checking the exit code must
+  // not see success on an output headed "Resume blocked".
+  const blocked = await invoke("resume", "--project-root", project);
+  assert.strictEqual(blocked.status, 2, blocked.stdout);
+  assert.match(blocked.stdout, /Resume blocked/);
+  assert.match(blocked.stderr, /open human override has to be reconciled/);
   const blockedAnswer = path.join(project, "blocked.md");
   fs.writeFileSync(blockedAnswer, "Must not be recorded yet.");
   const blockedRecord = await invoke("record", "--project-root", project, "--module", "1", "--status", "CONFIRMED", "--answer-file", blockedAnswer, "--owner", "User");

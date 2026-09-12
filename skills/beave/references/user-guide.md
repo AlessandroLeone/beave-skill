@@ -1,114 +1,271 @@
 # Beave User Guide
 
-Beave takes a project from an idea or an inconsistent workspace to an approved, traceable operating system. One host AI uses the skill with the user, then hands off complete documents, prompts, plans, gates, and durable memory to the AI environment that will execute the project.
+Beave prepares a complete multidisciplinary project folder through the user's chosen AI host. The agent investigates, asks necessary questions, records decisions and specifies how to execute, verify, recover and finish the agreed outcome. No total cap on questions or documents limits applicable coverage.
 
-## Choose the execution profile
+## One method, two operating profiles
 
-Use **Hybrid** by default when the project will span several sessions, includes multiple agents or components, handles important data, needs audits or approval gates, or must resume deterministically. Hybrid still uses the semantic skill for dialogue and judgment; the local engine manages repeatable mechanics.
-
-Use **Semantic-only** when the work is a small exploration, a single-session low-risk project, the environment cannot execute local code, the user declines persistence, or Beave is being used with an unsupported AI host. No npm package, executable, Python runtime, or library is required. The trade-off is manual state, coverage, resume, and drift control.
-
-## Choose the interaction mode
-
-| Mode | Best for | Rhythm |
+| Aspect | Semantic-only | Hybrid / programmatic |
 |---|---|---|
-| Guided | first-time users, cognitive-load reduction, ambiguous ideas | one question at a time with explanations |
-| Standard | most professional projects | up to two related questions with balanced analysis |
-| Expert | high-risk, complex, regulated, or architecture-heavy work | up to three questions, edge-case challenge, stronger gate evidence |
+| Method | Markdown skill/references or Portable Edition | The same method plus CLI |
+| Meaning and questions | Host AI and human | Host AI and human |
+| Project completeness | COV-001 and EXEC-001 | Identical COV-001 and EXEC-001 |
+| Persistence | Approved host file tools or full documents delivered for manual saving | Supported engine operations plus host semantic work |
+| Mechanical assurance | Host/manual review; no automatic engine guarantees | Implemented structural validation, versions, history and Resume |
 
-All modes inspect supplied documents first and all stop at human decision gates. Question limits are per turn; every mode continues until applicable coverage is complete or visibly deferred.
+Semantic-only is valid at any project size. Hybrid adds repeatable mechanics, not deeper thinking or more complete requirements. Neither profile proves completeness merely by creating files. Read [coverage-contract.md](coverage-contract.md) and [execution-package.md](execution-package.md).
 
-## Fast decision
+Three things are distinct:
+1. Beave's distribution: source repository, Markdown skill, npm package or packaged CLI executable.
+2. The user's project folder: specifications and operating instructions produced with Beave. It need not be an npm project or Git repository.
+3. Studio: optional desktop reader/editor and analysis app; its executable is not the CLI executable.
 
-| Condition | Profile |
+Installing only the skill makes it discoverable and does not activate Hybrid. npm/npx and verified CLI executables distribute programmatic capability, not a reasoning model. Check actual release availability and platform support; planned commands are not publication evidence.
+
+## Start or resume
+
+1. Provide the skill/references or Portable Edition and inspect existing project sources.
+2. Establish missing collaboration decisions: interaction mode, persistence and owners. Reuse valid earlier answers.
+3. Survey the outcome and disciplines; maintain the concern register. Ask unresolved questions in small turns without a total cap.
+4. Save confirmed answers incrementally within authority. Build the EXEC-001 package and obtain outstanding consequential approvals.
+5. Check the actual folder and issue a scoped readiness assessment. Manual delivery remains pending until saved files are checked.
+6. When authorized, the same agent may continue or a different agent/runtime may consume the folder. No board review, Studio or model change is mandatory.
+
+Guided asks one question per turn; Standard up to two related questions; Expert up to three with more technical discussion. Every mode covers applicable concerns and requires evidence appropriate to the risk.
+
+## Resuming: what it looks like end to end
+
+This is the whole point of the ledger, so here is the whole thing, with nothing
+left out.
+
+**1. Beave asks.** Before the question reaches you, it is recorded:
+
+```
+beave qa-ask --project-root . --id QNA-0007 \
+  --question "Who approves a completed job, and before or after it syncs?" \
+  --rationale "Module 2 cannot be recorded without the approval path." \
+  --module 2 --owner Ada --agent codex/session-a --operation-id ask-7
+```
+
+**2. You answer.** Your words are recorded exactly, from a file so nothing is
+reshaped by the shell:
+
+```
+beave qa-answer --project-root . --id QNA-0007 \
+  --answer-file answer.txt --owner Ada --operation-id answer-7
+```
+
+At this instant the answer is recorded and **not applied**. `beave qa-log --open`
+says so.
+
+**3. Beave records what it understood and what changed:**
+
+```
+beave qa-settle --project-root . --id QNA-0007 \
+  --interpretation "Supervisors approve after sync; offline jobs queue." \
+  --reply-file reply.md \
+  --consequences DEC-0007,REQ-0011 --documents docs/operating-model.md \
+  --next-id QNA-0008 --next-question "What happens to a job rejected after sync?" \
+  --owner Ada --operation-id settle-7
+```
+
+**4. The session ends.** A crash, a closed laptop, a context compaction, a
+finished day. Nothing is saved on the way out because nothing needed saving: each
+of the three steps was a transaction.
+
+**5. A different agent opens the project.** Not the same tool, not the same
+vendor, no access to the earlier conversation. It is handed the folder and one
+sentence: *"use Beave and resume this project"*.
+
+**6. It runs `beave resume --project-root .`** — because that is what being
+activated inside a Beave project means, not because you remembered to ask — and
+reads:
+
+```
+## Interview history
+
+- Recorded interactions: 7 (history available since 2026-03-02T09:14:51.402Z)
+- Readable at: QUESTION_ANSWER_HISTORY.md
+- Last completed interaction: QNA-0007 — Who approves a completed job, and before or after it syncs?
+  - Module: 2
+  - Records changed: DEC-0007, REQ-0011
+  - Documents changed: docs/operating-model.md
+- Planned, not asked: QNA-0008 — What happens to a job rejected after sync?
+
+## Where to continue
+
+**Start here.** Exact next action, as recorded: Record module 2, then open G2.
+```
+
+**7. It continues from QNA-0008.** It does not ask you again who approves a
+completed job: that question is `ANSWERED`, its answer is in the ledger, and its
+consequences are recorded. If the session had died between steps 2 and 3, Resume
+would instead have said *"answered and not applied"* and the new agent would have
+finished that transaction before asking anything.
+
+The recovery your own tool offers — `codex resume`, `claude --resume` — restores a
+conversation you had. This restores the project, to an agent that never had one.
+
+## Using the CLI
+
+Inspect `beave help` and the installed version. From a built checkout use `node lib/bin/beave.js help`. Establish authority and persistence before init.
+
+### The first command: `init` and its owners file
+
+This is the canonical description of the first executable command. Other surfaces point here instead of restating it.
+
+`init` is the first command that writes anything, and it will not run until it knows who decides. It requires `--owners-file`: a small JSON file naming the five decision authorities the engine stores. There are exactly five, the names of the keys are fixed, and a sixth key is refused rather than quietly dropped.
+
+| Key | The authority it names |
 |---|---|
-| One session, one agent, reversible exploration | Semantic-only |
-| Existing repository, more than one session | Hybrid |
-| Multi-agent plan, contracts, safety gates, audit | Hybrid |
-| No shell or local filesystem | Semantic-only |
-| Beave CLI is available and no third-party runtime packages may be installed | Hybrid |
-| Web-only AI without access to project state | Semantic-only |
+| `product` | scope and priorities: what the outcome is, and what it is not |
+| `technical` | architecture, stack, technical feasibility |
+| `budget` | money, time and resources that may be spent |
+| `safety` | data, privacy, security, destructive and irreversible actions |
+| `release` | publication, deployment, what reaches real users |
 
-## Start in Semantic-only
+One person may hold several roles: write the same name in each key. A value may name a role or a body rather than an individual when that is who actually decides. Every key must be present and non-empty. Authorities the project needs beyond these five — compliance, legal, clinical sign-off — are recorded in a governed document and referenced from there; the engine stores five and refuses what it cannot keep, so nothing is lost silently.
 
-1. Attach or paste `beave-portable.md`, or make the `beave` skill discoverable in the host.
-2. Ask the agent to use Beave for a new project, adoption, reconstruction, evolution, or resume.
-3. Answer Gate G0: Guided/Standard/Expert, approved persistence, and decision owners.
-4. Work one questionnaire module at a time.
-5. At every gate, save the state block produced by the agent in a project file or handoff.
-6. Use that state block plus canonical project documents to resume; do not rely on chat history alone.
+A complete minimal `owners.json`, saved in the project folder it describes:
 
-Semantic-only can design a complete project. It cannot independently guarantee state consistency, coverage, ID uniqueness, context budgets, or export equivalence.
+```json
+{
+  "product": "Ada Moreau",
+  "technical": "Ada Moreau",
+  "budget": "Ada Moreau",
+  "safety": "Dr. Chen (external safety reviewer)",
+  "release": "Ada Moreau"
+}
+```
 
-## Start in Hybrid
+`--owners-file` takes a path, absolute or relative to the current directory, so `--owners-file owners.json` is enough when the command runs from the project folder. The file is read once, at `init`. The names are copied into the recorded state and nothing re-reads the file afterwards; keeping it beside the project documents its input, and deleting it breaks nothing.
 
-1. Confirm Gate G0 semantically before creating state.
-2. Run `beave capabilities` (or `node bin/beave.mjs capabilities` in the alpha source workspace).
-3. Prepare a small JSON file naming the product, technical, budget, safety, and release decision owners.
-4. Run `beave init` against the project root with the confirmed project and interaction modes.
-5. Use `beave next` to obtain only the active module and its next questions.
-6. Put the user's confirmed answer in a UTF-8 file and use `beave record`; keep consequential approval in the canonical project documents too.
-7. Use governed diff/save/history/backup/restore/finalize operations as they become available; until then, preserve the same rules with host tools and label the deterministic guarantee unavailable.
-8. Use `beave context-pack` for a new session or bounded worker brief.
-9. Use `beave resume` at the start of a later session; it validates state before printing the active frontier.
-10. Use `beave override` when a human prompt changes prior work, then `beave reconcile` only after impacted artifacts are updated.
-11. Run `beave validate` at every lifecycle gate and before claiming readiness.
-12. Use `beave export` when distributing Beave or moving to another runtime.
+The whole first command, run from a project folder that already exists — `init` does not create the directory:
 
-The engine must not be initialized before the user approves where state may be written.
+```
+beave init --project-root . --project-name "My project" --project-mode Genesis --interaction-mode Standard --owners-file owners.json --operation-id first-init-2026-09-11
+```
 
-## Typical lifecycle
+From a built checkout, `node lib/bin/beave.js` replaces `beave`. `--project-mode` is one of Genesis, Adoption, Reconstruction, Evolution or Resume, defined under Modes in the skill instructions; `--interaction-mode` is Guided, Standard or Expert. `--operation-id` is yours to choose and must be 3 to 128 letters, numbers, `.`, `_`, `:` or `-`; reuse it only to retry the identical command. On success `init` prints the state location and sets the next action to `beave next --project-root .`.
 
-`INTAKE → DISCOVERY → INTERVIEW → RESEARCH → BLUEPRINT → FOUNDATION → PLAN → EXECUTE → VERIFY → RELEASE → OPERATE`
+The refusals, verbatim, so they are recognisable before they are met:
 
-Not every project needs the same number of files or agents. Beave scales artifact depth and review lanes to risk. A failed gate returns to the earliest invalid assumption or artifact.
+> `Missing required option --owners-file`
 
-## Designing the project's future agents
+> `Owners file requires product, technical, budget, safety, release` — a key is absent or its value is empty.
 
-- Beave does not spawn or run the project agents during initialization.
-- Design topology and ownership before the later execution system delegates work.
-- Give workers a context pack, authoritative sources, exact scope, output, verification, and escalation rule.
-- Parallelize only independent work with non-overlapping writes or frozen interfaces.
-- Keep one integrator for shared state, decision logs, roadmaps, and release artifacts.
-- Use an independent reviewer for consequences that justify it.
-- Save agent roles, prompts, permissions, dependencies, contracts, order, and handoffs in the project.
-- Treat native subagent/model routing as a capability of the later execution host, not a guarantee or runtime action of Beave itself.
+> `Owners file declares roles Beave cannot store: <keys>. Recognised roles are product, technical, budget, safety, release. Record the other authorities in a governed document and reference them there; nothing was written.`
 
-## Installation and distribution
+None of them writes anything. Fix the file and run the same command again.
 
-- **Engine CLI:** the npm package exposes `beave`. During development run `npm install -g <path-to-beavelab>`; after a public package exists use its published package name. `npx <package> <command>` runs it without a permanent global install.
-- **Windows PATH:** `npm config get prefix` shows the directory containing `beave.cmd`; that directory must be present in `PATH`.
-- **Codex:** place the canonical folder at `.agents/skills/beave/` in a repository or user skill directory.
-- **Gemini CLI:** the same `.agents/skills/beave/` path is supported; `.gemini/skills/beave/` is also valid, and `gemini skills link <path>` is suitable during development.
-- **Claude Code:** generate or copy the Claude adapter to `.claude/skills/beave/`.
-- **AGY:** expose the workspace skill through the approved project context and permissions.
-- **Other AI:** use the generated `beave-portable.md`.
+The audited alpha exposes capabilities, init, status, next, resume, record, the typed ledger commands, override, reconcile, re-record, gate, context-pack, validate, migrate, document operations, project-export/project-verify/project-import, install, verify-install and skill export. Read [engine-contract.md](engine-contract.md) for exact options and limitations. Structural gate checks do not replace semantic concern review.
 
-Do not keep manually edited runtime copies. Change canonical content, run tests, then regenerate adapters.
+Maintain COV-001 detail in indexed Markdown and link its confirmed records through the supported ledgers. `export` generates the Beave skill or adapters; `project-export` creates the user's verified handoff package.
 
-## Resume and handoff
+Give every mutating command a new caller-generated `--operation-id`; an exact retry is safe, while different inputs under the same ID are refused. Before `doc-save`, run `doc-diff` and pass its returned `confirmation_token` as `--confirm-token`. The token binds the approved preview to the actual save. Keep the complete project directory available during work; `project-export` creates a verified transfer package containing governed drafts, published documents, evidence, state and event history.
 
-Hybrid resume reads `.beave/state.json` and `events.jsonl`, validates them against the workspace, reports open human overrides, and produces the exact next module or gate. Semantic-only resume starts from the latest state block or handoff and re-verifies referenced files. Neither mode treats prompt cache as durable memory.
+## If something was interrupted, or looks wrong
 
-Resume can go as deep as the project's artifacts and gates allow. It can drive contracts, architecture, agent briefs, tasks, evidence, review and design freeze, but it cannot manufacture missing domain facts or decide `NEEDS USER DECISION` items. Those remain explicit human gates.
+Three commands, and the differences between them matter.
 
-## Safety
+**`beave replay --project-root .`** rebuilds your project's state from its
+recorded history and compares the two. It changes nothing. On a healthy project
+it says so in one line:
 
-- Keep secrets, private paths, and raw sensitive content out of state and context packs.
-- Do not grant network, credentials, publication, deployment, commit, push, purchase, or destructive permissions implicitly.
-- Use answer files instead of complex shell arguments for long or sensitive text.
-- Test destructive workflows only with disposable fixtures.
-- Preserve original documents and previous state versions.
+```text
+History replay: the state matches its history exactly (14 events from PROJECT_INITIALIZED, through revision 14).
+```
 
-## Troubleshooting
+On a project whose `state.json` was edited outside Beave it names the fields:
 
-- **Skill not found:** verify the runtime-specific directory and refresh/restart skill discovery.
-- **Engine unavailable:** continue Semantic-only; do not install an unrelated package with a similar name.
-- **Invalid state:** run `validate`, preserve the failing files, and restore only from a known Beave backup.
-- **Unsupported schema:** use the matching Beave version or an explicit migration; do not edit version numbers by hand.
-- **Adapter drift:** regenerate from canonical sources and compare source digests.
-- **Too much context:** generate a fresh context pack for only the active module or worker.
+```text
+History replay: DIVERGED. The state on disk is not what its own events produce.
+  decisions.0.title: rebuilt as "Bake weekly"
+Repair it with: beave replay --project-root . --repair --operation-id <id>
+```
 
-## What Beave does not do
+While that is true, Beave refuses to write anything on top of it and `resume`
+gives you no position rather than a position it cannot stand behind.
 
-Beave does not execute the user's project, launch its future agents, authorize itself, provide durable memory through model cache, guarantee identical runtime features, or replace source control, testing, human review, and release ownership. The Beave-enabled AI collaborates on decisions and recommendations, but consequential outcomes remain visibly confirmed by the user.
+**`beave replay --project-root . --repair --operation-id <id>`** puts the rebuilt
+state back. It copies what was there into `.beave/backups/` first — a repair
+never means a loss — records the repair as an event, and regenerates the derived
+documents. Run it when the state was damaged. If the edit was something you meant
+to do, make the same change through the command that records it instead.
+
+**`beave recover --project-root .`** tells you whether an operation was
+interrupted, and what finishing it would do. It changes nothing until you add
+`--apply`, and you usually do not need to: recovery happens automatically on the
+way into any command that touches the project, and it says so rather than passing
+in silence.
+
+It also names three kinds of damage that are *not* an interrupted write, and none
+of them is resolved behind your back: a journal that cannot be read, a leftover
+directory with no journal in it, and a last line of the history that was cut off
+mid-write. Only the last has an automatic remedy — `--apply` removes that line
+after copying the whole file into `.beave/backups/` — because an append is the
+last durable write of an operation, so a partial final line cannot be one that
+finished.
+
+**If `.beave/state.json` has gone missing** and the history is still there, every
+command says so and names the repair. That is the case the replay exists for:
+`beave replay --project-root . --repair --operation-id <id>` rebuilds the file.
+
+### If Beave says the project is in use
+
+One project, one writer. Beave takes a lock before it touches anything, so a
+second command on the same project waits a few seconds and then tells you what it
+is waiting behind — the command, the process, the machine and the moment it
+started. Wait for the first one to finish and run yours again.
+
+If a Beave command was killed, the lock it was holding stays on disk. The next
+command on the same machine sees that the process is gone, takes the lock over
+and carries on: there is nothing for you to do. Three cases are never resolved for
+you, because guessing would be how work gets lost — a lock held by a process that
+is **still running**, a lock from **another machine**, and a lock Beave **cannot
+read**. `beave unlock --project-root .` tells you which of those you are looking
+at and changes nothing.
+
+`--force` is for two of them and not the third. It releases a lock whose process
+is **known to be gone**, and it releases a lock from **another machine** —
+somebody has to be able to break a lock left on a shared folder by a laptop that
+is not coming back, and this engine cannot ask that laptop anything. It refuses a
+lock held by a live process here, a lock it cannot read, and a lock that does not
+say which machine holds it: Beave will not guess about a file it cannot reason
+about, and a wrong guess there is somebody's work. For those, make sure no Beave
+command is running and delete the file yourself.
+
+*An independent review released, with `--force`, a lock naming a process that was
+running at that moment: the record had no `host` field, and "not this machine"
+was being read as "another machine".*
+
+### Projects older than this
+
+A project created by an earlier Beave has a history that records *digests* of
+what changed rather than the changes themselves, so it cannot be replayed. That
+project is not damaged — everything works, and `validate` still says
+`Beave state is valid.` — but it is told, every time, what it cannot prove:
+
+```text
+This project's history has no point the state can be rebuilt from.
+Record a starting point with `beave baseline …`
+```
+
+`beave baseline --project-root . --reason "<why>" --owner <name> --operation-id
+<id>` records that starting point. From there on the project is reproducible.
+Everything before it stays in the file, exactly as it was, and is reported as
+outside the proof. Nothing is invented to fill the gap, because a history nobody
+recorded is not a history Beave is willing to make up.
+
+## Installation, history and recovery
+
+Use a reviewed compatible package or source build. Preview installation destinations with --dry-run and preserve existing installed skills. See [runtime-compatibility.md](runtime-compatibility.md). A source repository does not prove a published npm package or built executable exists.
+
+Semantic-only retains full canonical documents, coverage, decision history and next action through approved host/manual operations. Hybrid adds supported ledgers/events. Unsupported schema requires an explicit backed-up migration; never edit the version number to simulate one. Neither profile relies solely on chat memory.
+
+After consequential changes, record the override, inspect affected work and reconcile meaning. Paid Studio assistance is optional and does not remove free semantic/CLI responsibilities. Preserve superseded decisions and unresolved discrepancies.
+
+## Optional Studio
+
+Base Studio is a local desktop app with clean IDE-style navigation, manual Markdown editing and faithful tree/graph/timeline analysis. File integrity and existing relationship views do not certify semantic consistency. Assisted cross-document review, change-impact analysis and reconciliation are future subscription workflows, not prerequisites for Beave or execution.
+
+Initialization does not launch future project agents. Execution authority, capabilities, physical actors, professional approvals and completion evidence remain explicit in the package.
