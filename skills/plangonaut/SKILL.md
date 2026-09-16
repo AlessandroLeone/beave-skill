@@ -1,19 +1,19 @@
 ---
-name: beave
+name: plangonaut
 description: Prepare a complete multidisciplinary project system from an idea or existing workspace, with adaptive discovery, durable specifications, execution strategy and agent instructions. Use when starting, restructuring or resuming whole-project preparation for software or non-software work. Do not use for a single feature, bug fix or ordinary implementation task.
 ---
 
-# Beave
+# Plangonaut
 
-Turn an idea, brief, or existing workspace into a user-approved and traceable project operating system. One configured host AI uses Beave in direct conversation with the user: it proposes informed options, evaluates user ideas, asks every applicable question, persists decisions, and advances only through explicit gates.
+Turn an idea, brief, or existing workspace into a user-approved and traceable project operating system. One configured host AI uses Plangonaut in direct conversation with the user: it proposes informed options, evaluates user ideas, asks every applicable question, persists decisions, and advances only through explicit gates.
 
 ## Core contract
 
 Read [references/coverage-contract.md](references/coverage-contract.md) during discovery and readiness assessment. Read [references/execution-package.md](references/execution-package.md) when defining artifacts, work and handoff. Both contracts apply equally to Semantic-only and Hybrid.
 
 - The human is the product authority and owns consequential decisions.
-- The Beave-enabled host AI and the user develop decisions collaboratively: the AI discovers facts, exposes ambiguity, evaluates proposals, recommends options, and records outcomes after visible user confirmation.
-- Beave is for anyone using AI to structure a project. Adapt vocabulary and explanation to expertise, but never reduce applicable coverage merely because the user is inexperienced or the project appears simple.
+- The Plangonaut-enabled host AI and the user develop decisions collaboratively: the AI discovers facts, exposes ambiguity, evaluates proposals, recommends options, and records outcomes after visible user confirmation.
+- Plangonaut is for anyone using AI to structure a project. Adapt vocabulary and explanation to expertise, but never reduce applicable coverage merely because the user is inexperienced or the project appears simple.
 - Assume that an inexperienced user may trust every AI proposal. Clearly distinguish facts, inferences, recommendations, uncertainty, alternatives, and consequences.
 - Default to **Standard** interaction: ask a small group of related questions, recommend, recap, then stop and wait.
 - Do not silently choose product scope, risk tolerance, budget, external services, agent autonomy, publication, or destructive behavior.
@@ -30,7 +30,7 @@ Select after read-only inspection:
 - **Adoption:** existing project that needs an explicit operating system.
 - **Reconstruction:** inconsistent or undocumented project whose intent must be recovered.
 - **Evolution:** an established project starting a major new product or milestone.
-- **Resume:** durable Beave state or reliable project evidence exists; validate it against the current workspace, locate the earliest unresolved or stale decision, and continue from that frontier instead of repeating discovery.
+- **Resume:** durable Plangonaut state or reliable project evidence exists; validate it against the current workspace, locate the earliest unresolved or stale decision, and continue from that frontier instead of repeating discovery.
 
 Interaction modes:
 
@@ -43,8 +43,8 @@ Interaction modes:
 
 Execution profiles:
 
-- **Hybrid** is the default when the local Beave CLI and approved persistence are available. The agent handles meaning and recommendations; the TypeScript/Node engine handles state, routing, validation, context packs, document operations, gates, and exports.
-- **Semantic-only** uses the Markdown skill and references without the Beave CLI, at any project size. The host maintains full documents, coverage, history and handoffs through approved tools or manual delivery. Completeness criteria are identical to Hybrid; automatic transaction, conflict and validation guarantees are not implied.
+- **Hybrid** is the default when the local Plangonaut CLI and approved persistence are available. The agent handles meaning and recommendations; the TypeScript/Node engine handles state, routing, validation, context packs, document operations, gates, and exports.
+- **Semantic-only** uses the Markdown skill and references without the Plangonaut CLI, at any project size. The host maintains full documents, coverage, history and handoffs through approved tools or manual delivery. Completeness criteria are identical to Hybrid; automatic transaction, conflict and validation guarantees are not implied.
 - npm/npx, a packaged CLI executable and source checkout distribute the programmatic layer; they do not define different project methods. Installing a skill makes instructions discoverable and does not itself activate Hybrid. The Studio desktop executable is a separate optional reader/editor.
 - Never install a library merely to activate Hybrid: the distributable Node CLI has no mandatory third-party runtime dependencies. Python is not required.
 - Read [references/user-guide.md](references/user-guide.md) when selecting, installing, resuming, exporting, or troubleshooting a profile.
@@ -55,13 +55,13 @@ Execution profiles:
 
 **Step 0 is not optional, and it comes before you say anything to the user.**
 
-The moment Beave is activated, before classifying anything and before asking a
+The moment Plangonaut is activated, before classifying anything and before asking a
 single question, recover the durable state:
 
 1. Resolve the authorised project root.
-2. Look for `.beave/state.json` under it.
+2. Look for `.plangonaut/state.json` under it.
 3. **If that state exists and the CLI is available, run
-   `beave resume --project-root <root>` and read all of it.** Not a summary of
+   `plangonaut resume --project-root <root>` and read all of it.** Not a summary of
    it: the integrity report, the open overrides and reconciliations, the phase,
    the gate, the exact next action, the remaining forecast, the open decisions,
    and the interview history. Then continue from the frontier it names.
@@ -76,14 +76,14 @@ single question, recover the durable state:
    2. **the event chain is verified.** Every event records the digest of the one
       before it.
    3. **the state is rebuilt from the events and compared with the state on
-      disk.** This is `beave replay --verify`, run for you.
+      disk.** This is `plangonaut replay --verify`, run for you.
    4. **if the two disagree, Resume stops.** It prints `Resume blocked` and the
       fields that differ, and gives you no position at all — because it has
       none it can stand behind. Do not proceed, do not ask the user a question,
       and do not repair the state by editing it. The way out is
-      `beave replay --project-root . --repair --operation-id <id>`, which
+      `plangonaut replay --project-root . --repair --operation-id <id>`, which
       rebuilds the state from the history and keeps what was there in
-      `.beave/backups/`.
+      `.plangonaut/backups/`.
 
    A derived document that was edited is a different case: the canonical source
    is intact, so `resume` regenerates the document from it and says so. That
@@ -94,17 +94,17 @@ single question, recover the durable state:
    `QUESTION_ANSWER_HISTORY.md` — and say plainly that this recovery carries a
    lower guarantee than the engine's: you are reading a rendering, not verifying
    a ledger.
-6. If there is no Beave state, this is a new project. Start one.
+6. If there is no Plangonaut state, this is a new project. Start one.
 
-The user says *"use Beave and resume this project"* and nothing more. They must
+The user says *"use Plangonaut and resume this project"* and nothing more. They must
 not have to remember to tell you to run `resume`; running it is what being
-activated inside a Beave project means.
+activated inside a Plangonaut project means.
 
 This holds after a new session, an interruption, a context compaction, an agent
 being replaced, a move between Codex, Claude, Gemini or anything else, and the
 complete loss of the previous conversation. **Your provider's own session
 recovery is not a substitute.** `codex resume` and `claude --resume` restore a
-conversation; `beave resume` reads the project's official state. The first
+conversation; `plangonaut resume` reads the project's official state. The first
 is convenience, the second is the record — and on a project someone else started,
 the first does not exist for you at all.
 
@@ -142,7 +142,7 @@ If a current local knowledge graph exists, it may accelerate discovery, but it r
 
 ## Recording the interview
 
-Every question Beave puts to the user, and every answer, is recorded — in the
+Every question Plangonaut puts to the user, and every answer, is recorded — in the
 ledger through the CLI in Hybrid, and in the project's durable documents in
 Semantic-only. The record is what lets a different agent pick the project up
 without your conversation.
@@ -151,14 +151,14 @@ The cycle is three moments, and they are three commands because they are three
 different facts:
 
 1. **Before** putting a question to the user, open it:
-   `beave qa-ask --id QNA-0007 --question "…" --rationale "…" --module N --owner NAME`.
+   `plangonaut qa-ask --id QNA-0007 --question "…" --rationale "…" --module N --owner NAME`.
    Use `--planned` for a question you intend to ask but have not asked yet.
 2. **After** the user answers, record the answer exactly as given:
-   `beave qa-answer --id QNA-0007 --answer-file answer.txt --owner NAME`.
+   `plangonaut qa-answer --id QNA-0007 --answer-file answer.txt --owner NAME`.
    Write the answer to a file rather than an argument: a multi-line reply with
    quotation marks in it survives a file and does not always survive a shell.
 3. **Before moving on**, record what you did with it:
-   `beave qa-settle --id QNA-0007 --interpretation "…" --reply-file reply.md
+   `plangonaut qa-settle --id QNA-0007 --interpretation "…" --reply-file reply.md
    --consequences DEC-0007,REQ-0011 --documents docs/plan.md --next-id QNA-0008
    --next-question "…" --owner NAME`.
 
@@ -169,28 +169,28 @@ look finished. Do not invent a fourth state to paper over it.
 - Do not re-ask a question the ledger records as `ANSWERED`, unless the answer was
   invalidated, a later decision made it incoherent, or you need a clarification
   you then record as its own question.
-- A correction never deletes. `beave qa-supersede --id QNA-0007 --new-id QNA-0012`
+- A correction never deletes. `plangonaut qa-supersede --id QNA-0007 --new-id QNA-0012`
   keeps the old entry, its answer and its consequences, and marks what replaced it.
-- `beave qa-close --kind deferred|skipped|invalidated --reason "…"` closes a
+- `plangonaut qa-close --kind deferred|skipped|invalidated --reason "…"` closes a
   question without an answer, and the reason is required.
 - Record only interactions that define this project. A conversation about
   something else does not belong in its history.
 
 `QUESTION_ANSWER_HISTORY.md` at the project root is the readable rendering of all
 this. It is **generated**: editing it changes nothing and is reported by
-`beave validate`. The history itself is in `.beave/state.json`, with
-`.beave/events.jsonl` recording how it got there.
+`plangonaut validate`. The history itself is in `.plangonaut/state.json`, with
+`.plangonaut/events.jsonl` recording how it got there.
 
 What that does and does not guarantee, stated plainly because an independent
 review checked and because the answer changed on 2026-09-12.
 
 **What the engine can now prove.** Every event records the mutation it performed,
 the digest of the state before it, the digest of the state after it, and the
-digest of the preceding event. `beave replay --project-root .` rebuilds the state
-from those events and compares it with `.beave/state.json`, field by field. A
+digest of the preceding event. `plangonaut replay --project-root .` rebuilds the state
+from those events and compares it with `.plangonaut/state.json`, field by field. A
 question or an answer edited directly in the state file is therefore *detected*:
 `validate` refuses, `resume` blocks, and the next write refuses rather than
-building on it. `beave replay --repair` puts the recorded history back.
+building on it. `plangonaut replay --repair` puts the recorded history back.
 
 **What it still cannot prove.** There is no signature and no copy kept anywhere
 the same person cannot reach. Someone who edits `state.json` *and* rewrites the
@@ -203,7 +203,7 @@ is tamper-**evident**, and it is not tamper-proof. Do not tell a user it is.
 **What predates all of this.** A project created before this format carries
 events that recorded digests of each change rather than the change itself. They
 cannot be replayed, nothing is invented for them, and the engine says so instead
-of implying otherwise. `beave baseline --project-root . --reason "<why>" --owner
+of implying otherwise. `plangonaut baseline --project-root . --reason "<why>" --owner
 <name> --operation-id <id>` records a verifiable starting point: everything from
 there on is reproducible, everything before it stays in the file and stays
 outside the proof.
@@ -246,7 +246,7 @@ The interaction mode controls per-turn question count and explanation, never app
 
 ## Human override
 
-The user may correct or redirect Beave at any time in natural language. Treat a consequential correction as a human override:
+The user may correct or redirect Plangonaut at any time in natural language. Treat a consequential correction as a human override:
 
 1. restate the requested change and detect conflicts with confirmed decisions;
 2. record it in durable state and append an event when Hybrid is active;
@@ -284,18 +284,18 @@ The user must approve:
 - multi-agent topology and permissions;
 - initial tool and service set.
 
-Respect existing authorization for recording answers; do not wait until blueprint approval to preserve them. Obtain any outstanding decisions above before treating synthesis as approved. Keep one visible working file per logical document, advance its `-vN` suffix after each confirmed change, retain versions/diffs in `.beave/`, report the changed path and perform the final loss audit before writing the base filename. When a revision makes a recorded digest stop matching its file, restore an accidental change or re-point the record at the file that supersedes it, keeping the previous path, digest, authority and reason; never silence the check. Templates are defaults, not mandatory filenames. Use host/manual preservation where CLI support is unavailable and state the assurance limits.
+Respect existing authorization for recording answers; do not wait until blueprint approval to preserve them. Obtain any outstanding decisions above before treating synthesis as approved. Keep one visible working file per logical document, advance its `-vN` suffix after each confirmed change, retain versions/diffs in `.plangonaut/`, report the changed path and perform the final loss audit before writing the base filename. When a revision makes a recorded digest stop matching its file, restore an accidental change or re-point the record at the file that supersedes it, keeping the previous path, digest, authority and reason; never silence the check. Templates are defaults, not mandatory filenames. Use host/manual preservation where CLI support is unavailable and state the assurance limits.
 
 ## Project agent-system design boundary
 
-Beave itself runs through the single host AI model chosen by the user. It does not spawn, delegate to, run, or orchestrate the future agents of the project during initialization. When the project may benefit from multiple agents, read [references/multi-agent-system.md](references/multi-agent-system.md) and design the future organization as a project deliverable.
+Plangonaut itself runs through the single host AI model chosen by the user. It does not spawn, delegate to, run, or orchestrate the future agents of the project during initialization. When the project may benefit from multiple agents, read [references/multi-agent-system.md](references/multi-agent-system.md) and design the future organization as a project deliverable.
 
 - Choose the smallest topology that fits coupling, risk, cost, and runtime limits.
 - Define human sponsor, orchestrator/lead, workers, integrator, reviewers, and advisor only when justified.
 - Give every agent a bounded scope, exact sources, permitted files, tools, model/effort policy, deliverables, verification, escalation path, and handoff.
 - Save roles, prompts, contracts, dependencies, permissions, execution order, reviewer independence, and handoff procedures in the project artifacts.
 - After initialization, the same agent or another execution AI reads those artifacts and may instantiate the topology when authorized and supported. No agent switch, Studio use or board review is required.
-- Do not claim that the current host supports generated agent features merely because Beave can describe them.
+- Do not claim that the current host supports generated agent features merely because Plangonaut can describe them.
 
 ## Lifecycle
 
@@ -303,7 +303,7 @@ Design the complete state machine in [references/lifecycle.md](references/lifecy
 
 `INTAKE → DISCOVERY → INTERVIEW → RESEARCH → BLUEPRINT → FOUNDATION → PLAN → EXECUTE → VERIFY → RELEASE → OPERATE`
 
-Each transition has an entry condition, evidence, and human gate. During project initialization, Beave prepares the foundation, plans, prompts, and controls required for the later execution system; it does not build the user's project or launch its agents. Persist the current Beave phase, answered modules, decisions, blockers, and exact next action. Never depend on chat history as the sole state store.
+Each transition has an entry condition, evidence, and human gate. During project initialization, Plangonaut prepares the foundation, plans, prompts, and controls required for the later execution system; it does not build the user's project or launch its agents. Persist the current Plangonaut phase, answered modules, decisions, blockers, and exact next action. Never depend on chat history as the sole state store.
 
 Before claiming a phase or project complete, apply [references/quality-gates.md](references/quality-gates.md). Failed checks enter a bounded repair loop and then escalate; they are not hidden or retried indefinitely.
 
@@ -320,7 +320,7 @@ Report an operational forecast at every substantial update: known work, conditio
 
 ## Completion
 
-A Beave initialization run is complete only when:
+A Plangonaut initialization run is complete only when:
 
 - every applicable concern has provenance, status, owner and linked artifacts under COV-001; unresolved items prevent claims beyond the named ready scope;
 - blueprint, requirements, decisions, roadmap, agent system, risks, and quality strategy are traceable;
@@ -328,7 +328,7 @@ A Beave initialization run is complete only when:
 - permissions and human gates are explicit;
 - the whole agreed outcome has an execution route, sufficiently specified work, acceptance, recovery and completion conditions under EXEC-001; future-dependent detail has resolution procedures and blocking points;
 - the delivered folder has a checked entry point, reading order, durable state and exact first authorized action; a state summary alone is insufficient;
-- any recommended project-agent system exists as reviewed prompts and operating instructions, not as agents silently launched by Beave;
+- any recommended project-agent system exists as reviewed prompts and operating instructions, not as agents silently launched by Plangonaut;
 - the user approves the resulting project system.
 
 A paused or bounded-stage handoff may be useful without being a complete project system. Report the COV-001 readiness category and scope, evidence, unresolved items and next action. Never convert deferral into completeness. Do not start execution while required approval is outstanding.

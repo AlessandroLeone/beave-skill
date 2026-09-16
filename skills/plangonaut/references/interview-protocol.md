@@ -105,7 +105,7 @@ The engine derives the first four from recorded history and returns them beside 
 
 ### When the engine contradicts you
 
-`beave forecast` never overwrites the cycle state you declared. When a derived signal disagrees with it, the command records the signal beside your judgement and says so on stdout.
+`plangonaut forecast` never overwrites the cycle state you declared. When a derived signal disagrees with it, the command records the signal beside your judgement and says so on stdout.
 
 That output is addressed to you, and it carries an obligation. **Do not record the same cycle state again without answering the signal.** Either say why the signal is wrong for this project — a residual that grew because scope was deliberately widened is not a loop — or accept it and record the state it implies. Recording `REGOLARE` a second time over a standing `RISCHIO_LOOP` signal, with nothing said about it, turns the disagreement into noise the engine will keep printing and nobody will keep reading.
 

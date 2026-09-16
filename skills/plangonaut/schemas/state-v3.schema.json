@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://beavelab.it/schemas/beave-state-v3.json",
-  "title": "Beave project state (schema v3 — current)",
-  "description": "The current Beave project state schema. `schema_version` is 3 and this is what `beave init` writes and every command validates against. The older `state.schema.json` in this directory is the historical v2 schema, kept for migration and compatibility only.",
+  "$id": "https://plangonaut.com/schemas/plangonaut-state-v3.json",
+  "title": "Plangonaut project state (schema v3 — current)",
+  "description": "The current Plangonaut project state schema. `schema_version` is 3 and this is what `plangonaut init` writes and every command validates against. The older `state.schema.json` in this directory is the historical v2 schema, kept for migration and compatibility only.",
   "type": "object",
   "required": [
     "schema_version",
@@ -626,7 +626,122 @@
       }
     },
     "blockers": {
-      "type": "array"
+      "type": "array",
+      "$comment": "ALN-015. Heterogeneous by design. A plain string is a blocker written into the state file before this ledger existed: it has no owner, no date and no recorded status, it stays exactly as it was, and it is counted as OPEN because nothing ever recorded it as resolved. Converting one into a record would mean inventing the three fields it never had. New entries are records.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "$comment": "Legacy free text. Preserved, never rewritten, always counted as open."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "reason",
+              "status",
+              "owner",
+              "recorded_at",
+              "revision",
+              "updated_at"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^BLK-[A-Z0-9_-]+$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "enum": [
+                  "OPEN",
+                  "RESOLVED"
+                ]
+              },
+              "owner": {
+                "type": "string",
+                "minLength": 1
+              },
+              "recorded_at": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              "resolved_at": {
+                "type": "string"
+              },
+              "resolved_by": {
+                "type": "string"
+              },
+              "resolution": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "$comment": "RESOLVED keeps the record and gains resolution, resolved_by and resolved_at. Resolving never deletes: a blocker that happened and was cleared is part of how the project went."
+          }
+        ]
+      }
+    },
+    "blockers_none_verified": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "$comment": "ALN-015. Somebody looked and found nothing open, with their name on it. NOT required: every project written before this is valid and carries none, and absent means 'nobody has said so', which is why status answers UNKNOWN rather than NONE_VERIFIED. Cleared by any blocker mutation, because a verification is a statement about one state of the ledger and the ledger changing makes it stale rather than merely older.",
+      "required": [
+        "at",
+        "by",
+        "state_revision",
+        "event_id"
+      ],
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
     },
     "progress_forecast": {
       "$ref": "#/$defs/progress_forecast",
@@ -634,7 +749,7 @@
     },
     "forecast_history": {
       "type": "array",
-      "$comment": "Every previous forecast, oldest first. Written by `beave forecast`; `migrate` creates it empty so a migrated project has somewhere to put its first one. Also not required, for the same reason.",
+      "$comment": "Every previous forecast, oldest first. Written by `plangonaut forecast`; `migrate` creates it empty so a migrated project has somewhere to put its first one. Also not required, for the same reason.",
       "items": {
         "$ref": "#/$defs/progress_forecast"
       }
@@ -722,7 +837,7 @@
       "description": "The interview ledger, in the order the interactions happened. Absent on a project created before the ledger existed, which is a different fact from an empty ledger: absent means nothing was recorded, empty means recording is on and nothing has been asked yet.",
       "items": {
         "type": "object",
-        "description": "One recorded interaction: a question Beave put, the answer it received, and what it did with that answer. Appended, never rewritten: a correction adds an entry that supersedes this one and this one stays.",
+        "description": "One recorded interaction: a question Plangonaut put, the answer it received, and what it did with that answer. Appended, never rewritten: a correction adds an entry that supersedes this one and this one stays.",
         "required": [
           "id",
           "status",
@@ -994,7 +1109,7 @@
             "null"
           ],
           "minLength": 1,
-          "$comment": "The cause of the change. `null` only on the first forecast a project ever records; `beave forecast` refuses a later one without it."
+          "$comment": "The cause of the change. `null` only on the first forecast a project ever records; `plangonaut forecast` refuses a later one without it."
         },
         "recorded_by": {
           "type": "string",
@@ -1102,7 +1217,7 @@
     },
     "source_history": {
       "type": "array",
-      "$comment": "Written by `beave re-record` (OD-012). One entry per supersession of the file a record stands on. `path` and `sha256` are null when the record carried nothing before — a gate older than the rule that gave gates an evidence digest — which is a different fact from the previous digest having matched, and the two must not look alike.",
+      "$comment": "Written by `plangonaut re-record` (OD-012). One entry per supersession of the file a record stands on. `path` and `sha256` are null when the record carried nothing before — a gate older than the rule that gave gates an evidence digest — which is a different fact from the previous digest having matched, and the two must not look alike.",
       "items": {
         "type": "object",
         "required": [

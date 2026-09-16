@@ -1,5 +1,95 @@
 # Changelog
 
+## 0.3.0-alpha.1
+
+**Beave was renamed to Plangonaut.** The product, the command, the skill and the project state
+directory all carry the new name from this version on. Entries below this one describe releases made
+under the earlier name and are preserved as written.
+
+### The command
+
+`plangonaut` replaces `beave`. The published `@beavelab/beave` package is untouched and keeps its own
+command, so the two can sit side by side while you move:
+
+```
+npm uninstall -g @beavelab/beave
+npm install -g plangonaut
+```
+
+### Project state
+
+New projects use `.plangonaut/`. A project created before this version keeps `.beave/` and is read,
+validated and resumed without being migrated — `status` reports `state_format: "legacy"` so a caller
+knows which it is looking at. Opening a legacy project never creates `.plangonaut/`.
+
+A project holding **both** directories is refused as `PROJECT_STATE_AMBIGUOUS`: the engine will not
+guess which one is the project, because writing into the wrong one loses the other quietly.
+
+### Migrating
+
+```
+plangonaut migrate-brand --project-root . --dry-run
+plangonaut migrate-brand --project-root .
+plangonaut migrate-brand --project-root . --rollback <migration-id>
+```
+
+The migration validates the source, stages the new ledger in a directory that is deliberately *not*
+`.plangonaut/`, verifies it, swaps, and removes `.beave/` only once its bytes are provably inside
+`.plangonaut/migrations/<id>/legacy-backup/`. A receipt records every digest. **A migrated project has
+exactly one state directory**, and so does a rolled-back one. An interrupted migration reports
+`MIGRATION_INCOMPLETE` with the phase it stopped at, and is never readable as an ordinary project.
+
+### Machine codes and environment variables
+
+`NOT_BEAVE_PROJECT` is now `NOT_PLANGONAUT_PROJECT`, and `PROJECT_STATE_AMBIGUOUS` and
+`MIGRATION_INCOMPLETE` join the vocabulary. The old code is still understood on input. Every
+`BEAVE_*` environment variable has a `PLANGONAUT_*` spelling; the old one still works and says so
+once, the new one wins when both are set to the same value, and the two set to **different** values is
+refused rather than guessed.
+
+## 0.2.0-alpha.4
+
+### Added — a blocker ledger something can write (`ALN-015`)
+
+`state.blockers` existed from the first alpha, was read by `resume`, the forecast, the gate and
+Studio, and **no command wrote it**. An empty array therefore meant "this project has no blockers"
+and "nobody in this system can record one" at the same time, and the only honest answer `status`
+could give was `UNKNOWN`.
+
+`blocker-record`, `blocker-resolve` and `blocker-verify-none` write it. Each takes `--operation-id`,
+is idempotent under a retry, takes the project lock, honours `--expected-revision` on an existing
+record and writes its own event, so the ledger replays with everything else.
+
+**Resolving keeps the record.** It gains `resolution`, `resolved_by` and `resolved_at`, stops being
+counted, and stays visible in `resume` and the context pack.
+
+**And resolving the last blocker is not the same as verifying that none is open.** One is a statement
+about a blocker, the other about the project, and only a person can make the second — so any blocker
+mutation clears a previous verification and the answer returns to `UNKNOWN`. `NONE_VERIFIED` is
+reachable only through `blocker-verify-none`, which is refused while anything is open and names what.
+`status --json` gains `open_blockers` and `blockers_verified_none`.
+
+**Projects from earlier alphas keep their free-text blockers.** They stay strings, they are counted
+as open — nothing ever recorded them as resolved — and nothing invents an owner or a date for them.
+`migrate` converts none of them.
+
+### Added — refusals a program can branch on (`ALN-016`)
+
+A folder with no Beave project and a Beave project whose records disagree were both exit 2 with an
+English sentence on stderr, and they call for opposite responses: offer to set one up, or offer to
+repair and read nothing as fact. Telling them apart meant matching the prose.
+
+On a command whose output is JSON — `status` always, anything else given `--json` — a refusal is now
+a JSON document on stdout carrying `ok: false` and `error.kind`, one of `NOT_BEAVE_PROJECT`,
+`PROJECT_STATE_UNTRUSTED` or `COMMAND_FAILED`. An untrusted project also carries
+`blockers_assurance: "UNTRUSTED"`, which is the fourth value of a vocabulary that until now nothing
+could return.
+
+**Nothing else is on either stream in that mode**, not even the usual `BEAVE ERROR:` line, so a
+caller that merges stdout and stderr still gets one parseable document. Human output is unchanged,
+the exit code stays 2, and `error.message` is for people: it is not stable and a caller that parses
+it is a caller this did not help.
+
 ## Unreleased
 
 ### Fixed — the same operation, written two ways, is one operation (`ALN-013`)

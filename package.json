@@ -1,20 +1,20 @@
 {
-  "name": "@beavelab/beave",
-  "version": "0.2.0-alpha.3",
+  "name": "plangonaut",
+  "version": "0.3.0-alpha.1",
   "description": "Human-governed project discovery, planning, multi-agent orchestration, and durable resume.",
   "type": "module",
   "bin": {
-    "beave": "lib/bin/beave.js"
+    "plangonaut": "lib/bin/plangonaut.js"
   },
   "files": [
     "lib",
-    "skills/beave/SKILL.md",
-    "skills/beave/VERSION",
-    "skills/beave/agents",
-    "skills/beave/assets",
-    "skills/beave/references",
-    "skills/beave/schemas",
-    "dist/beave-portable.md",
+    "skills/plangonaut/SKILL.md",
+    "skills/plangonaut/VERSION",
+    "skills/plangonaut/agents",
+    "skills/plangonaut/assets",
+    "skills/plangonaut/references",
+    "skills/plangonaut/schemas",
+    "dist/plangonaut-portable.md",
     "README.md",
     "CHANGELOG.md",
     "VERSION",
@@ -27,7 +27,7 @@
     "verify": "npm test && npm run pack:check",
     "prepack": "npm run build",
     "pack:check": "npm pack --dry-run",
-    "portable": "node lib/bin/beave.js export --target portable --output-dir dist",
+    "portable": "node lib/bin/plangonaut.js export --target portable --output-dir dist",
     "build:exe": "node scripts/build-exe.mjs"
   },
   "engines": {
@@ -42,14 +42,7 @@
     "claude",
     "gemini"
   ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/AlessandroLeone/beave-skill.git"
-  },
-  "homepage": "https://beavelab.it",
-  "bugs": {
-    "url": "https://github.com/AlessandroLeone/beave-skill/issues"
-  },
+  "homepage": "https://plangonaut.com",
   "license": "Apache-2.0",
   "private": false,
   "devDependencies": {

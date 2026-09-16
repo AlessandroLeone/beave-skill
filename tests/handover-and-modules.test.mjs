@@ -20,15 +20,15 @@ import { fileURLToPath } from "node:url";
  *    that nothing in the folder explained it. The rule was missing, not broken.
  *  - **The first file a Windows user writes.** PowerShell 5.1 puts a BOM in
  *    front of `owners.json`, the file looks right in every editor, and the very
- *    first Beave command refuses it (ALN-009).
+ *    first Plangonaut command refuses it (ALN-009).
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(root, args, env = {}) {
+function plangonaut(root, args, env = {}) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `H${counter}-${Date.now()}`);
@@ -41,25 +41,25 @@ function beave(root, args, env = {}) {
 }
 
 function ok(root, args, env) {
-  const result = beave(root, args, env);
+  const result = plangonaut(root, args, env);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function refused(root, args) {
-  const result = beave(root, args);
+  const result = plangonaut(root, args);
   assert.notStrictEqual(result.status, 0, `expected ${args[0]} to be refused:\n${result.out}`);
   return result.out;
 }
 
 function crashAt(root, label, args) {
-  const result = beave(root, args, { BEAVE_FAULT_AT: label });
+  const result = plangonaut(root, args, { PLANGONAUT_FAULT_AT: label });
   assert.strictEqual(result.status, 97, `the fault at ${label} did not fire:\n${result.out}`);
   return result;
 }
 
 function scratch(t) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "beave-handover-"));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-handover-"));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   return base;
 }
@@ -131,32 +131,32 @@ for (const label of STAGING_FAULTS) {
        * handoff used to call that "harmless" and exit 0.
        */
       assert.ok(fs.existsSync(out), "the package vanished after the rename");
-      const stray = path.join(out, ".beave-staging.json");
+      const stray = path.join(out, ".plangonaut-staging.json");
       if (fs.existsSync(stray)) {
         assert.strictEqual(path.resolve(JSON.parse(fs.readFileSync(stray, "utf8")).destination), path.resolve(out), "the marker does not name the folder it is in");
-        const refused = beave(root, ["project-verify", "--package-dir", out]);
+        const refused = plangonaut(root, ["project-verify", "--package-dir", out]);
         assert.notStrictEqual(refused.status, 0, "a package still carrying its staging marker was verified");
         assert.match(refused.out, /records the exporting machine/);
-        assert.notStrictEqual(beave(root, ["project-import", "--package-dir", out, "--project-root", path.join(scratch(t), `from-marked-${label}`)]).status, 0);
+        assert.notStrictEqual(plangonaut(root, ["project-import", "--package-dir", out, "--project-root", path.join(scratch(t), `from-marked-${label}`)]).status, 0);
 
         // And the way out costs nothing.
         ok(root, ["recover", "--project-root", root, "--apply"]);
         assert.ok(!fs.existsSync(stray), "the marker was not cleared by the next command");
       }
-      assert.strictEqual(beave(root, ["project-verify", "--package-dir", out]).status, 0, "a promoted package did not verify once the marker was gone");
+      assert.strictEqual(plangonaut(root, ["project-verify", "--package-dir", out]).status, 0, "a promoted package did not verify once the marker was gone");
     } else {
       assert.ok(!fs.existsSync(out), "a half-built package was promoted to the destination");
     }
 
     // The project itself is untouched: an export only ever reads it.
-    assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
-    assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
+    assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
+    assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
 
-    // Whatever is left beside the destination is Beave's own and is resolved by
+    // Whatever is left beside the destination is Plangonaut's own and is resolved by
     // the next export, which then succeeds.
     const second = path.join(parent, "package-2");
     ok(root, ["project-export", "--project-root", root, "--output-dir", second]);
-    assert.strictEqual(beave(root, ["project-verify", "--package-dir", second]).status, 0);
+    assert.strictEqual(plangonaut(root, ["project-verify", "--package-dir", second]).status, 0);
     for (const entry of listing(parent)) {
       assert.ok(!entry.endsWith(".tmp"), `a staging directory was left behind: ${entry}`);
     }
@@ -175,9 +175,9 @@ for (const label of STAGING_FAULTS) {
 
     const promoted = label === "staging-after-rename" || label === "staging-before-cleanup";
     if (promoted) {
-      assert.ok(fs.existsSync(path.join(destination, ".beave", "state.json")), "the imported project is not there");
-      assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0, "a promoted import did not validate");
-      const stray = path.join(destination, ".beave-staging.json");
+      assert.ok(fs.existsSync(path.join(destination, ".plangonaut", "state.json")), "the imported project is not there");
+      assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0, "a promoted import did not validate");
+      const stray = path.join(destination, ".plangonaut-staging.json");
       if (fs.existsSync(stray)) {
         // Same rule as the export: the marker names the folder it is in, so the
         // promotion happened, and re-importing to that destination clears it.
@@ -185,22 +185,22 @@ for (const label of STAGING_FAULTS) {
         refused(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
         assert.ok(!fs.existsSync(stray), "the marker was not cleared");
       }
-      assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0);
+      assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0);
       return;
     }
 
     assert.ok(!fs.existsSync(destination), "a half-built project was promoted to the destination");
     // The package is untouched, and a second import to the same place works.
-    assert.strictEqual(beave(root, ["project-verify", "--package-dir", pkg]).status, 0);
+    assert.strictEqual(plangonaut(root, ["project-verify", "--package-dir", pkg]).status, 0);
     ok(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
-    assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0);
+    assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0);
     for (const entry of listing(parent)) {
       assert.ok(!entry.endsWith(".tmp"), `a staging directory was left behind: ${entry}`);
     }
   });
 }
 
-test("a directory that is not Beave's is never removed, whatever it is called", (t) => {
+test("a directory that is not Plangonaut's is never removed, whatever it is called", (t) => {
   const root = exportable(t);
   const out = path.join(scratch(t), "package");
   const parent = path.dirname(out);
@@ -214,13 +214,13 @@ test("a directory that is not Beave's is never removed, whatever it is called", 
   const otherStaging = path.join(parent, ".somewhere-else.abc.tmp");
   fs.mkdirSync(otherStaging, { recursive: true });
   fs.writeFileSync(
-    path.join(otherStaging, ".beave-staging.json"),
+    path.join(otherStaging, ".plangonaut-staging.json"),
     `${JSON.stringify({ format: "beave-staging-v1", kind: "export", staging_id: "x", operation_id: null, source: root, destination: otherDestination, phase: "COPYING", pid: 999_999, host: os.hostname(), created_at: "2026-09-12T00:00:00.000Z", updated_at: "2026-09-12T00:00:00.000Z", expected_files: null, expected_manifest_sha256: null }, null, 2)}\n`,
   );
 
   ok(root, ["project-export", "--project-root", root, "--output-dir", out]);
 
-  assert.ok(fs.existsSync(path.join(decoy, "mine.txt")), "a directory with no Beave marker was removed");
+  assert.ok(fs.existsSync(path.join(decoy, "mine.txt")), "a directory with no Plangonaut marker was removed");
   assert.ok(fs.existsSync(otherStaging), "a staging for another destination was removed");
 });
 
@@ -256,7 +256,7 @@ test("an existing destination is never overwritten, and a retry with different i
   ok(root, ["project-import", "--package-dir", out, "--project-root", destination, "--operation-id", "OP-IMPORT"]);
   // The same operation id with the same input is a no-op; with different input
   // it is a different operation wearing the same name.
-  const retry = beave(root, ["project-import", "--package-dir", out, "--project-root", destination, "--operation-id", "OP-IMPORT"]);
+  const retry = plangonaut(root, ["project-import", "--package-dir", out, "--project-root", destination, "--operation-id", "OP-IMPORT"]);
   assert.strictEqual(retry.status, 0, retry.out);
   assert.match(retry.out, /Idempotent retry/);
   /*
@@ -266,13 +266,13 @@ test("an existing destination is never overwritten, and a retry with different i
    * cross-check it, and this test says so rather than asserting a guarantee the
    * engine does not make.
    */
-  const elsewhere = beave(root, ["project-import", "--package-dir", out, "--project-root", path.join(scratch(t), "other"), "--operation-id", "OP-IMPORT"]);
+  const elsewhere = plangonaut(root, ["project-import", "--package-dir", out, "--project-root", path.join(scratch(t), "other"), "--operation-id", "OP-IMPORT"]);
   assert.strictEqual(elsewhere.status, 0, "an import into a fresh directory shares no history with the first one");
 
   // An export writes no event into the project, so its operation id is not in
   // the history to be compared against; a mutation's is.
   ok(root, ["decision", "--project-root", root, "--id", "DEC-9", "--title", "Recorded once", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-ONCE"]);
-  const conflicting = beave(root, ["decision", "--project-root", root, "--id", "DEC-9", "--title", "Something else", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-ONCE"]);
+  const conflicting = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-9", "--title", "Something else", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-ONCE"]);
   assert.notStrictEqual(conflicting.status, 0);
   assert.match(conflicting.out, /already used with different input/);
 });
@@ -281,7 +281,7 @@ test("an existing destination is never overwritten, and a retry with different i
 // The interview and the active module
 // ---------------------------------------------------------------------------
 
-const state = (root) => JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+const state = (root) => JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
 const activeModule = (root) => state(root).modules.find((item) => !["CONFIRMED", "DEFERRED", "NOT APPLICABLE"].includes(item.status));
 const entry = (root, id) => state(root).interview_log.find((item) => item.id === id);
 
@@ -322,7 +322,7 @@ test("the answer that finishes a module closes it in the same operation", (t) =>
   fs.writeFileSync(path.join(root, "QNA-0001.md"), "A neighbourhood bakery.\n");
   ok(root, ["qa-answer", "--project-root", root, "--id", "QNA-0001", "--answer-file", path.join(root, "QNA-0001.md"), "--owner", "Ada"]);
 
-  const before = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8").trim().split("\n").length;
+  const before = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8").trim().split("\n").length;
   const out = ok(root, [
     "qa-settle", "--project-root", root, "--id", "QNA-0001",
     "--interpretation", "Purpose recorded.", "--reply", "Noted.",
@@ -332,14 +332,14 @@ test("the answer that finishes a module closes it in the same operation", (t) =>
   assert.match(out, /Recorded module 1 as CONFIRMED in the same operation/);
 
   // One operation, one event: the settlement and the module outcome are one fact.
-  const after = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8").trim().split("\n");
+  const after = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8").trim().split("\n");
   assert.strictEqual(after.length, before + 1, "the module outcome was written as a second event");
   assert.strictEqual(JSON.parse(after[after.length - 1]).module_completed.id, 1);
 
   assert.strictEqual(state(root).modules[1].status, "CONFIRMED");
   assert.strictEqual(activeModule(root).id, 2, "the module did not advance when it was recorded");
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 });
 
 test("a question against a module the interview has not reached is refused, and says what to do", (t) => {
@@ -442,11 +442,11 @@ test("an interruption while a settlement completes a module loses neither", (t) 
     "--complete-module", "CONFIRMED", "--module-answer-file", path.join(root, "m.md"), "--owner", "Ada", "--operation-id", "OP-SETTLE",
   ]);
 
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   assert.ok(entry(root, "QNA-0001").consequences_recorded_at, "the settlement was lost");
   assert.strictEqual(state(root).modules[1].status, "CONFIRMED", "the module outcome was lost while the settlement survived");
   assert.strictEqual(activeModule(root).id, 2);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -463,7 +463,7 @@ function ownersFile(root, { bom = false, text = null } = {}) {
 }
 
 function initWith(root, file) {
-  return beave(root, [
+  return plangonaut(root, [
     "init", "--project-root", root, "--project-name", "BOM",
     "--project-mode", "Resume", "--interaction-mode", "Standard", "--owners-file", file,
   ]);
@@ -480,7 +480,7 @@ test("owners.json without a BOM works, and with the BOM PowerShell writes it wor
   assert.deepStrictEqual([...fs.readFileSync(file).subarray(0, 3)], [0xef, 0xbb, 0xbf], "the fixture has no BOM, so it proves nothing");
   const result = initWith(withBom, file);
   assert.strictEqual(result.status, 0, `the first command a Windows user runs still fails:\n${result.out}`);
-  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(withBom, ".beave", "state.json"), "utf8")).decision_owners.product, "Ada");
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(withBom, ".plangonaut", "state.json"), "utf8")).decision_owners.product, "Ada");
 });
 
 test("the BOM is tolerated and nothing else is", (t) => {
@@ -514,7 +514,7 @@ test("a BOM does not stop the names inside from being what they are", (t) => {
   const owners = { product: "Ada Moreau", technical: "Søren Kjær", budget: "李明", safety: "Ada Moreau", release: "Zoë O'Brien" };
   const file = ownersFile(root, { bom: true, text: JSON.stringify(owners, null, 2) });
   assert.strictEqual(initWith(root, file).status, 0);
-  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8")).decision_owners, owners);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8")).decision_owners, owners);
 });
 
 // ---------------------------------------------------------------------------
@@ -542,14 +542,14 @@ test("an interrupted init leaves a project the next command reports as valid", (
    * command a user runs.
    */
   crashAt(root, "after-events", args);
-  const retry = beave(root, args);
+  const retry = plangonaut(root, args);
   assert.strictEqual(retry.status, 0, retry.out);
   assert.match(retry.out, /Idempotent retry/);
 
-  const validated = beave(root, ["validate", "--project-root", root]);
+  const validated = plangonaut(root, ["validate", "--project-root", root]);
   assert.strictEqual(validated.status, 0, `the project the retry called finished is not valid:\n${validated.out}`);
   assert.ok(fs.existsSync(path.join(root, "QUESTION_ANSWER_HISTORY.md")), "the derived document was never written");
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
 });
 
 for (const label of ["after-staged", "before-commit", "after-events", "after-state", "after-commit"]) {
@@ -566,8 +566,8 @@ for (const label of ["after-staged", "before-commit", "after-events", "after-sta
       "--owners-file", path.join(root, "owners.json"), "--operation-id", "OP-INIT",
     ]);
 
-    const validated = beave(root, ["validate", "--project-root", root]);
-    if (fs.existsSync(path.join(root, ".beave", "state.json"))) {
+    const validated = plangonaut(root, ["validate", "--project-root", root]);
+    if (fs.existsSync(path.join(root, ".plangonaut", "state.json"))) {
       assert.strictEqual(validated.status, 0, `killed at ${label}:\n${validated.out}`);
       assert.ok(fs.existsSync(path.join(root, "QUESTION_ANSWER_HISTORY.md")));
     }
@@ -580,7 +580,7 @@ test("a package carries nothing its manifest does not declare", (t) => {
   ok(root, ["project-export", "--project-root", root, "--output-dir", out]);
 
   /*
-   * Every package used to carry `backups/.beave-staging.json.*.bak`: the marker
+   * Every package used to carry `backups/.plangonaut-staging.json.*.bak`: the marker
    * was written with `atomicWrite`, which keeps a copy of what it replaces, and
    * the copies were inside the directory that then became the package. A handoff
    * shipped the exporter's hostname, PID and absolute paths in files the
@@ -613,11 +613,11 @@ test("project-verify refuses a file the manifest does not declare, wherever it i
   for (const [index, relative] of ["EVIL.md", "files/EVIL.md", "history/ART-9-v7.md"].entries()) {
     const out = path.join(scratch(t), `tampered-${index}`);
     ok(root, ["project-export", "--project-root", root, "--output-dir", out]);
-    assert.strictEqual(beave(root, ["project-verify", "--package-dir", out]).status, 0, "the clean package did not verify");
+    assert.strictEqual(plangonaut(root, ["project-verify", "--package-dir", out]).status, 0, "the clean package did not verify");
 
     fs.mkdirSync(path.dirname(path.join(out, relative)), { recursive: true });
     fs.writeFileSync(path.join(out, relative), "added after the export\n");
-    const verified = beave(root, ["project-verify", "--package-dir", out]);
+    const verified = plangonaut(root, ["project-verify", "--package-dir", out]);
     assert.notStrictEqual(verified.status, 0, `an added ${relative} was accepted`);
     assert.match(verified.out, /manifest does not declare/);
     assert.match(verified.out, new RegExp(relative.replace(/[/.]/g, "\\$&")));
@@ -630,15 +630,15 @@ test("a staging directory is not a package, and neither verify nor import will t
   const parent = path.dirname(out);
   crashAt(root, "staging-before-rename", ["project-export", "--project-root", root, "--output-dir", out]);
 
-  const staging = fs.readdirSync(parent).map((entry) => path.join(parent, entry)).find((candidate) => fs.existsSync(path.join(candidate, ".beave-staging.json")));
+  const staging = fs.readdirSync(parent).map((entry) => path.join(parent, entry)).find((candidate) => fs.existsSync(path.join(candidate, ".plangonaut-staging.json")));
   assert.ok(staging, "the interrupted export left no staging directory to test with");
 
-  const verified = beave(root, ["project-verify", "--package-dir", staging]);
+  const verified = plangonaut(root, ["project-verify", "--package-dir", staging]);
   assert.notStrictEqual(verified.status, 0, "a staging directory verified as a package");
-  assert.match(verified.out, /is a Beave staging directory, not a package/);
+  assert.match(verified.out, /is a Plangonaut staging directory, not a package/);
   assert.match(verified.out, /never finished/);
 
-  const imported = beave(root, ["project-import", "--package-dir", staging, "--project-root", path.join(scratch(t), "from-staging")]);
+  const imported = plangonaut(root, ["project-import", "--package-dir", staging, "--project-root", path.join(scratch(t), "from-staging")]);
   assert.notStrictEqual(imported.status, 0, "a staging directory was imported as a project");
   assert.match(imported.out, /not a package/);
   assert.ok(!fs.existsSync(path.join(scratch(t), "from-staging")));
@@ -651,7 +651,7 @@ test("the natural retry clears the marker an interrupted promotion left behind",
   const destination = path.join(scratch(t), "delivered-retry");
 
   crashAt(root, "staging-after-rename", ["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-RETRY"]);
-  const stray = path.join(destination, ".beave-staging.json");
+  const stray = path.join(destination, ".plangonaut-staging.json");
   assert.ok(fs.existsSync(stray), "the fixture did not produce the leftover marker");
 
   /*
@@ -659,35 +659,35 @@ test("the natural retry clears the marker an interrupted promotion left behind",
    * `Idempotent retry` and return before the code that recognises the marker,
    * so the file stayed there for ever. The resolution runs first now.
    */
-  const retry = beave(root, ["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-RETRY"]);
+  const retry = plangonaut(root, ["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-RETRY"]);
   assert.strictEqual(retry.status, 0, retry.out);
   assert.ok(!fs.existsSync(stray), "the natural retry left the marker in place");
-  assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0);
+  assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0);
 });
 
 test("re-exporting to the same destination clears the marker before it refuses", (t) => {
   const root = exportable(t);
   const out = path.join(scratch(t), "pkg-same-destination");
   crashAt(root, "staging-after-rename", ["project-export", "--project-root", root, "--output-dir", out]);
-  const stray = path.join(out, ".beave-staging.json");
+  const stray = path.join(out, ".plangonaut-staging.json");
   assert.ok(fs.existsSync(stray));
 
   // The refusal is right — the package is there — but it used to happen before
   // any recovery, so the only command that recognises the marker never reached it.
-  const again = beave(root, ["project-export", "--project-root", root, "--output-dir", out]);
+  const again = plangonaut(root, ["project-export", "--project-root", root, "--output-dir", out]);
   assert.notStrictEqual(again.status, 0);
   assert.match(again.out, /Refusing to overwrite existing project package/);
   assert.ok(!fs.existsSync(stray), "the marker survived a re-export to the same destination");
-  assert.strictEqual(beave(root, ["project-verify", "--package-dir", out]).status, 0);
+  assert.strictEqual(plangonaut(root, ["project-verify", "--package-dir", out]).status, 0);
 });
 
 test("a command leaves no permanent backup of the files that exist only while it runs", (t) => {
   const root = project(t, "NoLitter");
-  const backups = path.join(root, ".beave", "backups");
+  const backups = path.join(root, ".plangonaut", "backups");
   for (let index = 0; index < 8; index += 1) ok(root, ["status", "--project-root", root]);
 
   const litter = (fs.existsSync(backups) ? fs.readdirSync(backups) : []).filter(
-    (entry) => entry.startsWith("lock.json") || entry.startsWith(".beave-staging.json") || entry.startsWith("journal.json"),
+    (entry) => entry.startsWith("lock.json") || entry.startsWith(".plangonaut-staging.json") || entry.startsWith("journal.json"),
   );
   /*
    * `noteObservedRevision` rewrote the lock through `atomicWrite`, which keeps a
@@ -707,7 +707,7 @@ test("project-import refuses a file the manifest does not declare, wherever it i
   /*
    * The check existed, in the command that reports rather than the command that
    * acts. `project-verify` refused a rogue file in seven positions; `project-
-   * import` accepted it in all seven and then said `Beave state is valid.` -- a
+   * import` accepted it in all seven and then said `Plangonaut state is valid.` -- a
    * false success on the trust boundary the verifier exists to guard.
    */
   for (const [index, relative] of ["rogue.txt", "files/rogue.md", "files/docs/.hidden", "history/ART-9-v7.md", "state/extra.json", "deep/nested/payload.bin"].entries()) {
@@ -717,7 +717,7 @@ test("project-import refuses a file the manifest does not declare, wherever it i
     fs.writeFileSync(path.join(out, relative), "added after the export\n");
 
     const destination = path.join(scratch(t), `from-rogue-${index}`);
-    const imported = beave(root, ["project-import", "--package-dir", out, "--project-root", destination]);
+    const imported = plangonaut(root, ["project-import", "--package-dir", out, "--project-root", destination]);
     assert.notStrictEqual(imported.status, 0, `an added ${relative} was imported`);
     assert.match(imported.out, /manifest does not declare/);
     assert.ok(!fs.existsSync(destination), "the refused import created the destination anyway");
@@ -728,7 +728,7 @@ test("the marker a crash leaves in a finished package makes both verify and impo
   const root = exportable(t);
   const out = path.join(scratch(t), "pkg-with-marker");
   crashAt(root, "staging-after-rename", ["project-export", "--project-root", root, "--output-dir", out]);
-  const marker = path.join(out, ".beave-staging.json");
+  const marker = path.join(out, ".plangonaut-staging.json");
   assert.ok(fs.existsSync(marker), "the fixture did not leave the marker");
 
   /*
@@ -743,12 +743,12 @@ test("the marker a crash leaves in a finished package makes both verify and impo
   const body = JSON.parse(fs.readFileSync(marker, "utf8"));
   assert.ok(body.host && body.pid, "the marker no longer carries host data; this test is testing nothing");
 
-  const verified = beave(root, ["project-verify", "--package-dir", out]);
+  const verified = plangonaut(root, ["project-verify", "--package-dir", out]);
   assert.notStrictEqual(verified.status, 0, "a package carrying the exporter's hostname and PID verified");
   assert.match(verified.out, /records the exporting machine/);
 
   const destination = path.join(scratch(t), "from-marked");
-  const imported = beave(root, ["project-import", "--package-dir", out, "--project-root", destination]);
+  const imported = plangonaut(root, ["project-import", "--package-dir", out, "--project-root", destination]);
   assert.notStrictEqual(imported.status, 0, "a package carrying the exporter's hostname and PID imported");
   assert.ok(!fs.existsSync(destination));
 
@@ -757,12 +757,12 @@ test("the marker a crash leaves in a finished package makes both verify and impo
   assert.ok(!fs.existsSync(marker));
   ok(root, ["project-verify", "--package-dir", out]);
   ok(root, ["project-import", "--package-dir", out, "--project-root", destination]);
-  assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0);
+  assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0);
 });
 
 test("status refuses a project whose state does not agree with its history", (t) => {
   const root = project(t, "Divergent");
-  const location = path.join(root, ".beave", "state.json");
+  const location = path.join(root, ".plangonaut", "state.json");
   const state = JSON.parse(fs.readFileSync(location, "utf8"));
   state.exact_next_action = "edited by hand";
   fs.writeFileSync(location, JSON.stringify(state, null, 2));
@@ -773,11 +773,11 @@ test("status refuses a project whose state does not agree with its history", (t)
    * 0 -- the last command in the family, found by a third review beside the
    * areas it had been asked to look at.
    */
-  const reported = beave(root, ["status", "--project-root", root]);
+  const reported = plangonaut(root, ["status", "--project-root", root]);
   assert.strictEqual(reported.status, 2, reported.out);
   assert.match(reported.out, /does not agree with its history/);
   assert.match(reported.out, /replay --project-root . --repair/);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 2);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 2);
 });
 
 // ---------------------------------------------------------------------------
@@ -799,18 +799,18 @@ test("the recorded next action names the questions that are actually open", (t) 
    * question, so a field nothing had updated beat a live fact of the ledger.
    */
   ask("QNA-0001", "What is this for, in one sentence?");
-  const afterOne = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
-  assert.match(afterOne.exact_next_action, /^Answer the open question \(QNA-0001\) with beave qa-answer/);
+  const afterOne = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
+  assert.match(afterOne.exact_next_action, /^Answer the open question \(QNA-0001\) with plangonaut qa-answer/);
 
   ask("QNA-0002", "Who is it for, and why now?");
-  const afterTwo = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
-  assert.match(afterTwo.exact_next_action, /^Answer the open questions \(QNA-0001, QNA-0002\) with beave qa-answer, then settle each/);
+  const afterTwo = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
+  assert.match(afterTwo.exact_next_action, /^Answer the open questions \(QNA-0001, QNA-0002\) with plangonaut qa-answer, then settle each/);
 
-  const resumed = beave(root, ["resume", "--project-root", root]);
+  const resumed = plangonaut(root, ["resume", "--project-root", root]);
   assert.strictEqual(resumed.status, 0, resumed.out);
   assert.match(resumed.out, /QNA-0001, QNA-0002/);
   assert.doesNotMatch(resumed.out, /no next question is recorded yet/);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 });
 
 test("qa-ask does not overwrite a next action a person wrote", (t) => {
@@ -820,7 +820,7 @@ test("qa-ask does not overwrite a next action a person wrote", (t) => {
     "--owner", "Ada", "--next-action", "Ask Nadia about the hall booking before anything else.",
   ]);
 
-  const asked = beave(root, [
+  const asked = plangonaut(root, [
     "qa-ask", "--project-root", root, "--id", "QNA-0001", "--question", "What is this for?",
     "--rationale", "It decides what the project is for.", "--owner", "Ada",
   ]);
@@ -828,7 +828,7 @@ test("qa-ask does not overwrite a next action a person wrote", (t) => {
   // Kept, and the sentence it would have written is offered rather than applied.
   assert.match(asked.out, /written by a person, so it is kept unchanged/);
   assert.match(asked.out, /Suggested instead: Answer the open question \(QNA-0001\)/);
-  const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.strictEqual(state.exact_next_action, "Ask Nadia about the hall booking before anything else.");
 });
 
@@ -865,14 +865,14 @@ test("the engine recognises its own sentence, so a settled question does not fre
    * other questions were open. The bounded check found it saying that with
    * three open.
    */
-  const settled = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  const settled = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.match(settled.exact_next_action, /^The interview has nothing open\./);
 
   ask("QNA-0002", "What is it for, in one sentence?");
-  const after = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
-  assert.match(after.exact_next_action, /^Answer the open question \(QNA-0002\) with beave qa-answer/);
+  const after = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
+  assert.match(after.exact_next_action, /^Answer the open question \(QNA-0002\) with plangonaut qa-answer/);
 
-  const resumed = beave(root, ["resume", "--project-root", root]);
+  const resumed = plangonaut(root, ["resume", "--project-root", root]);
   assert.strictEqual(resumed.status, 0, resumed.out);
   assert.doesNotMatch(resumed.out, /no next question is recorded yet/);
 });
@@ -903,7 +903,7 @@ test("settling one question while others are open does not announce that none ar
    * listed QNA-0002 and QNA-0003 fifty lines below. Adding the sentence to the
    * list of the engine's own made it replaceable; it did not make it true.
    */
-  const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.match(state.exact_next_action, /^Answer the open questions \(QNA-0002, QNA-0003\)/);
   const resumed = ok(root, ["resume", "--project-root", root]);
   assert.doesNotMatch(resumed, /no next question is recorded yet/);
@@ -919,7 +919,7 @@ test("closing or superseding a question moves the recorded action off it", (t) =
   ask("QNA-0002", "Who is it for?");
 
   ok(root, ["qa-close", "--project-root", root, "--id", "QNA-0001", "--kind", "deferred", "--reason", "waiting on legal", "--owner", "Ada"]);
-  let state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  let state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.doesNotMatch(state.exact_next_action, /QNA-0001/, "the action still names a question that can no longer be answered");
   assert.match(state.exact_next_action, /QNA-0002/);
 
@@ -928,7 +928,7 @@ test("closing or superseding a question moves the recorded action off it", (t) =
     "--question", "Who exactly is it for?", "--rationale", "The first was too vague.",
     "--reason", "unclear", "--owner", "Ada",
   ]);
-  state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.match(state.exact_next_action, /QNA-0009/);
   assert.doesNotMatch(state.exact_next_action, /QNA-0002/);
 
@@ -949,7 +949,7 @@ test("the engine recognises its own handwriting whatever the caller wrote in it"
   ok(root, ["qa-ask", "--project-root", root, "--id", "QNA-10000", "--question", "A five digit id?", "--rationale", "Ids may be longer than four digits.", "--owner", "Ada"]);
   const asked = ok(root, ["qa-ask", "--project-root", root, "--id", "QNA-10001", "--question", "And another?", "--rationale", "Same reason.", "--owner", "Ada"]);
   assert.doesNotMatch(asked, /written by a person/, "the engine did not recognise a sentence it had written one command earlier");
-  let state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  let state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.match(state.exact_next_action, /QNA-10000, QNA-10001/);
 
   // A multi-line follow-up question is flattened into one line, and stays the
@@ -960,7 +960,7 @@ test("the engine recognises its own handwriting whatever the caller wrote in it"
     "--interpretation", "Yes.", "--reply", "Recorded.", "--owner", "Ada",
     "--next-id", "QNA-10002", "--next-question", "Line one?\nLine two?", "--next-rationale", "It has two parts.",
   ]);
-  state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.doesNotMatch(state.exact_next_action, /\n/, "a newline reached the recorded next action");
   assert.match(state.exact_next_action, /^Ask QNA-10002: Line one\? Line two\?$/);
 
@@ -984,7 +984,7 @@ test("a sentence a person wrote survives all of this", (t) => {
   }
   ok(root, ["qa-close", "--project-root", root, "--id", "QNA-0001", "--kind", "deferred", "--reason", "later", "--owner", "Ada"]);
 
-  const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.strictEqual(state.exact_next_action, human, "a person's sentence was overwritten");
 });
 
@@ -1009,7 +1009,7 @@ test("a gate condition spanning two lines does not break the recorded next actio
     "--review-date", "2026-12-01",
   ]);
 
-  const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
   assert.doesNotMatch(state.exact_next_action, /\n/, "a newline reached the recorded next action");
   assert.match(state.exact_next_action, /First line of the condition\. Second line\.$/);
 

@@ -2,7 +2,7 @@
 
 Persist one current state and one exact next gate. Never skip a state merely because later work appears obvious.
 
-Beave prepares the documents, prompts, ledgers, gates and evidence rules for this lifecycle. Initialization does not execute the project or launch its agents. The same agent or another runtime follows the prepared artifacts once execution is authorized; Beave may be invoked again for Resume, audit or evolution.
+Plangonaut prepares the documents, prompts, ledgers, gates and evidence rules for this lifecycle. Initialization does not execute the project or launch its agents. The same agent or another runtime follows the prepared artifacts once execution is authorized; Plangonaut may be invoked again for Resume, audit or evolution.
 
 ## 1. INTAKE
 
@@ -34,7 +34,7 @@ Plan the whole agreed outcome under EXEC-001 and decompose currently definable w
 
 ## 8. EXECUTE
 
-The initialized project instructs its later execution AI to use the approved agent topology. Work is isolated when useful, task contexts remain fresh and bounded, user changes are preserved, and checkpoints are explicit. Each worker returns artifacts and evidence; the project's orchestrator verifies rather than trusting summaries. Beave prepares and validates these instructions but does not launch the workers.
+The initialized project instructs its later execution AI to use the approved agent topology. Work is isolated when useful, task contexts remain fresh and bounded, user changes are preserved, and checkpoints are explicit. Each worker returns artifacts and evidence; the project's orchestrator verifies rather than trusting summaries. Plangonaut prepares and validates these instructions but does not launch the workers.
 
 ## 9. VERIFY
 

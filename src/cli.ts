@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SKILL_ROOT = path.join(PACKAGE_ROOT, "skills", "beave");
+const SKILL_ROOT = path.join(PACKAGE_ROOT, "skills", "plangonaut");
 const VERSION = fs.readFileSync(path.join(PACKAGE_ROOT, "VERSION"), "utf8").trim();
 const SCHEMA_VERSION = 3;
 
@@ -29,10 +29,120 @@ const MODULE_TERMINAL_STATUSES = new Set(["CONFIRMED", "DEFERRED", "NOT APPLICAB
 const OPEN_RISK_STATUSES = new Set(["IDENTIFIED", "REALIZED"]);
 const CLOSED_RISK_STATUSES = new Set(["MITIGATED", "ACCEPTED"]);
 
-class BeaveError extends Error {}
+/**
+ * What kind of refusal this is, for a caller that cannot read English.
+ *
+ * Three values, deliberately few. They are the distinctions a program has to
+ * act on differently, not a taxonomy of everything that can go wrong:
+ *
+ *   NOT_PLANGONAUT_PROJECT  there is no project at the root that was asked
+ *                           about, in either format. Offer to initialise one.
+ *   PROJECT_STATE_AMBIGUOUS both `.plangonaut/` and `.beave/` are present. The
+ *                           engine refuses to choose; a person decides which is
+ *                           the project.
+ *   MIGRATION_INCOMPLETE    a `migrate-brand` run did not finish. The remedy is
+ *                           to complete it or roll it back, which is not the
+ *                           remedy for an ambiguous project — hence its own kind.
+ *   PROJECT_STATE_UNTRUSTED there is one, and its state, schema, events or
+ *                           replay do not agree. Offer to repair; do not read
+ *                           the state as fact.
+ *   COMMAND_FAILED          everything else — a bad option, a stale revision, a
+ *                           refused precondition. The project is fine.
+ *
+ * A new kind is a contract change, so the set stays small on purpose. A caller
+ * that handles these and treats anything unrecognised as COMMAND_FAILED keeps
+ * working when one is added.
+ *
+ * **The old spelling is still understood.** `NOT_BEAVE_PROJECT` was this
+ * vocabulary's name for the first of these before the product was renamed, and
+ * adapters written against it are still in use. `interpretErrorKind` maps it to
+ * the current name on the way in; nothing emits it any more.
+ */
+type ErrorKind =
+  | "NOT_PLANGONAUT_PROJECT"
+  | "PROJECT_STATE_AMBIGUOUS"
+  | "MIGRATION_INCOMPLETE"
+  | "PROJECT_STATE_UNTRUSTED"
+  | "COMMAND_FAILED";
+
+/**
+ * Every spelling a caller may send us, resolved to the one we act on.
+ *
+ * Reading direction only. A machine code is part of a published contract, so an
+ * adapter compiled against `0.2.x` keeps working; but a project created by this
+ * version is described in this version's words, and nothing here emits a legacy
+ * code. The map is the compatibility window written down rather than implied.
+ */
+const LEGACY_ERROR_KINDS: Record<string, ErrorKind> = {
+  NOT_BEAVE_PROJECT: "NOT_PLANGONAUT_PROJECT",
+};
+
+export function interpretErrorKind(value: string): ErrorKind | null {
+  if (LEGACY_ERROR_KINDS[value]) return LEGACY_ERROR_KINDS[value];
+  const known: ErrorKind[] = [
+    "NOT_PLANGONAUT_PROJECT",
+    "PROJECT_STATE_AMBIGUOUS",
+    "MIGRATION_INCOMPLETE",
+    "PROJECT_STATE_UNTRUSTED",
+    "COMMAND_FAILED",
+  ];
+  return known.includes(value as ErrorKind) ? (value as ErrorKind) : null;
+}
+
+class PlangonautError extends Error {
+  readonly kind: ErrorKind;
+  constructor(message: string, kind: ErrorKind = "COMMAND_FAILED") {
+    super(message);
+    this.kind = kind;
+  }
+}
 
 function now(): string {
   return new Date().toISOString();
+}
+
+/**
+ * One environment variable, under either of its two names.
+ *
+ * The rename gives every `BEAVE_*` hook a `PLANGONAUT_*` spelling. A harness,
+ * a script or a CI job written against the old one keeps working — but it is
+ * told, once, that the name it used has been superseded, because a silent
+ * compatibility shim is how a deprecation window never closes.
+ *
+ * The one case that refuses is both names present with **different** values.
+ * There is no defensible winner: picking the new one silently discards a
+ * deliberate setting, and picking the old one silently ignores the current
+ * name. So the caller is asked which they meant.
+ */
+const ENV_NOTICES = new Set<string>();
+
+function readEnv(name: string): string | undefined {
+  const legacy = name.replace(/^PLANGONAUT_/, "BEAVE_");
+  const current = process.env[name];
+  const previous = legacy === name ? undefined : process.env[legacy];
+
+  if (current !== undefined && previous !== undefined && current !== previous) {
+    throw new PlangonautError(
+      `${name} and ${legacy} are both set, to different values.
+` +
+        `  ${name}=${current}
+  ${legacy}=${previous}
+` +
+        `${legacy} is the superseded name. Unset it, or make the two agree. Nothing was read.`,
+    );
+  }
+  if (current !== undefined) {
+    if (previous !== undefined && !ENV_NOTICES.has(legacy)) {
+      ENV_NOTICES.add(legacy);
+      console.error(`Note: ${legacy} is superseded by ${name}, which is set to the same value. ${legacy} can be removed.`);
+    }
+    return current;
+  }
+  if (previous !== undefined && !ENV_NOTICES.has(legacy)) {
+    ENV_NOTICES.add(legacy);
+    console.error(`Note: ${legacy} is the pre-rename name of ${name} and is still honoured. Prefer ${name}.`);
+  }
+  return previous;
 }
 
 function sha256(value: string | Buffer): string {
@@ -163,7 +273,7 @@ interface ForecastRange { min: number; max: number; }
  * What the engine counted for itself, from the ledgers, at the moment the
  * forecast was recorded.
  *
- * Never supplied by the caller: `beave forecast` has no option that writes any of
+ * Never supplied by the caller: `plangonaut forecast` has no option that writes any of
  * it. The addendum's rule is that the caller describes the work and the engine
  * counts what it can already see, so that a forecast can be checked against the
  * project rather than only believed.
@@ -246,13 +356,35 @@ interface State {
   operations: Operation[];
   checkpoints: Checkpoint[];
 
-  blockers: string[];
+  /**
+   * The blocker ledger.
+   *
+   * **Heterogeneous on purpose.** Every project written before `ALN-015` holds
+   * plain strings here — a sentence somebody typed into the state file, with no
+   * owner, no date and no status. Those stay exactly as they are: converting one
+   * into a record would mean inventing the three fields it never had, and a
+   * fabricated owner is worse than an unattributed sentence. A legacy string is
+   * read as **open**, because a blocker whose status was never recorded has not
+   * been recorded as resolved.
+   */
+  blockers: (string | Blocker)[];
+  /**
+   * The last time somebody said, on the record, that they looked and found none.
+   *
+   * Absent on every project that predates `ALN-015`, and absent again the moment
+   * any blocker is recorded or resolved — a verification is a statement about a
+   * particular state of the ledger, and the ledger changing makes it stale
+   * rather than merely older. This is what separates `NONE_VERIFIED` from
+   * `UNKNOWN`; without it an empty list would slide back into meaning "none",
+   * which is the defect this whole field exists to prevent.
+   */
+  blockers_none_verified?: BlockerVerification | null;
   risks_legacy?: string[];
   evidence_legacy?: string[];
   // Both optional, and they have to stay optional. A project that has never
   // recorded a forecast is not an invalid project, and the two ALN-005 pilots are
   // the real prior projects that prove it: neither carries either field and both
-  // must keep answering "Beave state is valid.".
+  // must keep answering "Plangonaut state is valid.".
   progress_forecast?: ProgressForecast;
   forecast_history?: ProgressForecast[];
   /**
@@ -277,7 +409,7 @@ interface State {
 }
 
 // Flags that stand alone: they carry approval, not a value.
-const BOOLEAN_FLAGS = new Set(["dry-run", "accept-base-overwrite", "replace-human-next-action", "planned", "reconstructed", "regenerate", "open", "last", "json", "verify", "repair", "apply", "force", "crosscutting"]);
+const BOOLEAN_FLAGS = new Set(["dry-run", "resume", "discard-changes", "accept-base-overwrite", "replace-human-next-action", "planned", "reconstructed", "regenerate", "open", "last", "json", "verify", "repair", "apply", "force", "crosscutting"]);
 
 /** Line separator used where a template literal would be harder to read. */
 const NL = "\n";
@@ -285,7 +417,7 @@ const NL = "\n";
 /**
  * The interview ledger.
  *
- * `PLANNED` is a question Beave intends to ask; `ASKED` has been put to the user
+ * `PLANNED` is a question Plangonaut intends to ask; `ASKED` has been put to the user
  * and has no answer yet; `ANSWERED` has one. Whether that answer has been
  * *applied* to the project's records is deliberately **not** a status: it is
  * `consequences_recorded_at`, a timestamp written by the one command that
@@ -337,6 +469,7 @@ const COMMAND_OPTIONS: Record<string, string[]> = {
   resume: ["project-root"],
   validate: ["project-root"],
   migrate: ["project-root", "operation-id"],
+  "migrate-brand": ["project-root", "dry-run", "resume", "rollback", "discard-changes"],
   // Reading and repairing are the same command because they answer the same
   // question; `--repair` is what turns the answer into a write, and it needs an
   // operation id like every other mutation.
@@ -350,6 +483,18 @@ const COMMAND_OPTIONS: Record<string, string[]> = {
   // it is a command a person runs rather than something a retry does.
   unlock: ["project-root", "force"],
   record: ["project-root", "module", "status", "answer-file", "owner", "summary", "operation-id"],
+  /*
+   * ALN-015. Hyphenated, not `blocker record`.
+   *
+   * `parse()` takes argv[0] as the whole command name and everything after it as
+   * `--flags`; there is no subcommand level to put a second word on, and adding
+   * one would change how every existing command is parsed. Every multi-word
+   * command already here is hyphenated for the same reason — `doc-save`,
+   * `qa-answer`, `project-import`, `re-record`, `verify-install`.
+   */
+  "blocker-record": ["project-root", "id", "title", "reason", "owner", "evidence-file", "expected-revision", "operation-id"],
+  "blocker-resolve": ["project-root", "id", "resolution", "owner", "evidence-file", "expected-revision", "operation-id"],
+  "blocker-verify-none": ["project-root", "owner", "note", "operation-id"],
   override: ["project-root", "instruction-file", "owner", "reason", "operation-id"],
   // OD-012. `override` creates; this re-points what an existing record stands on.
   "re-record": ["project-root", "kind", "id", "source-file", "owner", "reason", "operation-id"],
@@ -434,9 +579,9 @@ function assertKnownOptions(command: string, flags: Flags): void {
   const universal = new Set(["operation-id", "idempotency-key"]);
   const unknown = Object.keys(flags).filter((key) => !universal.has(key) && !allowed.includes(key));
   if (!unknown.length) return;
-  throw new BeaveError(
+  throw new PlangonautError(
     `Unknown option${unknown.length > 1 ? "s" : ""} for ${command}: ${unknown.map((key) => `--${key}`).join(", ")}. ` +
-      `Accepted: ${allowed.map((key) => `--${key}`).join(", ")}. Nothing was written — an option Beave does not store is refused rather than dropped.`
+      `Accepted: ${allowed.map((key) => `--${key}`).join(", ")}. Nothing was written — an option Plangonaut does not store is refused rather than dropped.`
   );
 }
 
@@ -445,7 +590,7 @@ function parse(argv: string[]): { command: string; flags: Flags } {
   const flags: Flags = {};
   for (let index = 0; index < rest.length; index += 1) {
     const token = rest[index];
-    if (!token.startsWith("--")) throw new BeaveError(`Unexpected argument: ${token}`);
+    if (!token.startsWith("--")) throw new PlangonautError(`Unexpected argument: ${token}`);
     const key = token.slice(2);
     if (BOOLEAN_FLAGS.has(key)) {
       flags[key] = true;
@@ -457,13 +602,13 @@ function parse(argv: string[]): { command: string; flags: Flags } {
     // its confirmation token: a caller forwarding that empty token was told
     // "Missing value for --confirm-token" instead of the reason the preview was
     // refused in the first place.
-    if (value === undefined || value.startsWith("--")) throw new BeaveError(`Missing value for --${key}`);
+    if (value === undefined || value.startsWith("--")) throw new PlangonautError(`Missing value for --${key}`);
     // A repeated option used to overwrite the earlier one without a word:
     // `--sources DEC-1 --sources DEC-2` recorded provenance on DEC-2 alone, and
     // the caller was told the save succeeded. Same family as an unknown option —
     // supplied input discarded in silence — so it gets the same answer.
     if (Object.prototype.hasOwnProperty.call(flags, key)) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `Option --${key} was given more than once, and only the last value would have been kept. Supply it once; a list goes in one value, comma-separated. Nothing was written.`
       );
     }
@@ -475,22 +620,146 @@ function parse(argv: string[]): { command: string; flags: Flags } {
 
 function required(flags: Flags, key: string): string {
   const val = flags[key];
-  if (typeof val !== "string") throw new BeaveError(`Missing required option --${key}`);
+  if (typeof val !== "string") throw new PlangonautError(`Missing required option --${key}`);
   return val;
 }
 
 function resolveProject(value: string): string {
   const root = path.resolve(value);
-  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new BeaveError(`Project root is not a directory: ${root}`);
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    // Not a directory at all, so certainly not a project in one. A caller
+    // deciding whether to offer "initialise Plangonaut here" needs this to land in
+    // the same branch as an ordinary folder rather than in the generic one.
+    throw new PlangonautError(`Project root is not a directory: ${root}`, "NOT_PLANGONAUT_PROJECT");
+  }
   return root;
 }
 
-function stateRoot(root: string): string {
-  const target = path.resolve(root, ".beave");
+/**
+ * Where a project keeps its ledger, in the two spellings that exist.
+ *
+ * `.plangonaut/` is canonical. `.beave/` is what every project created before
+ * the rename has, and reading it is not a courtesy: a project is somebody's
+ * recorded work, and a tool that stops reading it has deleted it as far as they
+ * are concerned.
+ */
+const STATE_DIR = ".plangonaut";
+const LEGACY_STATE_DIR = ".beave";
+
+/**
+ * What a migration in flight is called on disk.
+ *
+ * The staging directory is deliberately **not** `.plangonaut`: a half-built
+ * ledger that the resolver counts as an active state would make the project
+ * ambiguous for the whole duration of its own migration, and an interruption
+ * would leave it ambiguous forever. `.plangonaut-migration-<id>/` is recognised
+ * as staging and never as state.
+ */
+const MIGRATION_MARKER = ".plangonaut-migration.json";
+const MIGRATION_STAGING_PREFIX = ".plangonaut-migration-";
+
+export type StateFormat = "plangonaut" | "legacy";
+
+export interface StateLocation {
+  /** Which spelling this project uses. */
+  format: StateFormat;
+  /** The directory name, `.plangonaut` or `.beave`. */
+  name: string;
+  /** The resolved absolute path. */
+  dir: string;
+  /** True while the project is being read in its pre-rename format. */
+  legacy: boolean;
+}
+
+/**
+ * Which of the five conditions this root is in.
+ *
+ * Returns a location for the two that have one, and throws for the three that
+ * do not — each with its own machine kind, because the remedies differ and a
+ * caller that cannot tell them apart cannot offer the right next step:
+ *
+ *   both directories      a person decides which is the project. Refusing is the
+ *                         whole point: a silent preference would eventually
+ *                         write half a project's history into the directory
+ *                         nobody was reading, and neither half would be wrong
+ *                         enough to notice.
+ *   migration unfinished  complete it or roll it back. Not the same as
+ *                         ambiguous, although it looks identical on disk.
+ *   neither               not a project here.
+ */
+function locateState(root: string): StateLocation {
+  /*
+   * A root that is not there yet.
+   *
+   * `project-import` asks about its destination before creating it, and the
+   * containment check below resolves real paths, which a directory that does
+   * not exist has none of. There is no state in a folder that does not exist,
+   * so the answer is the canonical location and no refusal — the caller is
+   * about to create the folder, or about to fail on its own terms.
+   */
+  if (!fs.existsSync(root)) {
+    return { format: "plangonaut", name: STATE_DIR, dir: path.resolve(root, STATE_DIR), legacy: false };
+  }
   const realRoot = fs.realpathSync.native(root);
-  const resolvedTarget = fs.existsSync(target) ? fs.realpathSync.native(target) : target;
-  if (path.relative(realRoot, resolvedTarget).startsWith("..")) throw new BeaveError("State must stay inside the project root");
-  return target;
+  const contained = (target: string): string => {
+    const resolved = fs.existsSync(target) ? fs.realpathSync.native(target) : target;
+    if (path.relative(realRoot, resolved).startsWith("..")) throw new PlangonautError("State must stay inside the project root");
+    return target;
+  };
+
+  const current = contained(path.resolve(root, STATE_DIR));
+  const legacy = contained(path.resolve(root, LEGACY_STATE_DIR));
+  const hasCurrent = fs.existsSync(current);
+  const hasLegacy = fs.existsSync(legacy);
+
+  // The marker is read before the directories are counted: an interrupted
+  // migration leaves exactly the shape an ambiguous project has, and the
+  // difference between "somebody has two projects here" and "a command of ours
+  // stopped halfway" is the difference between two unrelated remedies.
+  const marker = path.join(root, MIGRATION_MARKER);
+  if (fs.existsSync(marker)) {
+    throw new PlangonautError(
+      `A brand migration at ${root} did not finish: ${MIGRATION_MARKER} is still there.\n` +
+        `Nothing was read. Finish it or undo it:\n` +
+        `  plangonaut migrate-brand --project-root . --resume\n` +
+        `  plangonaut migrate-brand --project-root . --rollback`,
+      "MIGRATION_INCOMPLETE",
+    );
+  }
+
+  if (hasCurrent && hasLegacy) {
+    throw new PlangonautError(
+      `${root} has both ${STATE_DIR}/ and ${LEGACY_STATE_DIR}/, and only one of them can be the project.\n` +
+        `Nothing was read and nothing was changed. This is not something to guess at: whichever one is\n` +
+        `not the project is somebody's earlier work, and writing into the wrong one loses it quietly.\n` +
+        `Move or remove the directory that is not the project, then run the command again.`,
+      "PROJECT_STATE_AMBIGUOUS",
+    );
+  }
+
+  if (hasCurrent) return { format: "plangonaut", name: STATE_DIR, dir: current, legacy: false };
+  if (hasLegacy) return { format: "legacy", name: LEGACY_STATE_DIR, dir: legacy, legacy: true };
+
+  // Neither exists. The caller is either about to create one (`init`) or about
+  // to fail on a missing `state.json` with a message of its own, and both want
+  // the canonical path rather than a refusal from here.
+  return { format: "plangonaut", name: STATE_DIR, dir: current, legacy: false };
+}
+
+/**
+ * The project's state directory.
+ *
+ * Unchanged as a signature on purpose: fifty-eight call sites read a path out of
+ * this function, and a rename that made each of them decide between two
+ * directories would be fifty-eight chances to decide differently.
+ */
+function stateRoot(root: string): string {
+  return locateState(root).dir;
+}
+
+/** Whether this project is being read in its pre-rename format. */
+export function stateFormat(root: string): StateFormat {
+  return locateState(root).format;
 }
 
 function boundedOutput(base: string, relative: string): string {
@@ -500,7 +769,7 @@ function boundedOutput(base: string, relative: string): string {
   const realBase = fs.realpathSync.native(base);
   const realProbe = fs.realpathSync.native(probe);
   const rebuilt = path.join(realProbe, path.relative(probe, candidate));
-  if (path.relative(realBase, rebuilt).startsWith("..")) throw new BeaveError("Output path resolves outside the approved state directory");
+  if (path.relative(realBase, rebuilt).startsWith("..")) throw new PlangonautError("Output path resolves outside the approved state directory");
   return candidate;
 }
 
@@ -509,7 +778,7 @@ function boundedOutput(base: string, relative: string): string {
  *
  * Windows PowerShell 5.1 writes one in front of every file `Set-Content
  * -Encoding utf8` produces, so the first file a Windows user creates —
- * `owners.json`, for the very first Beave command — looks correct in every
+ * `owners.json`, for the very first Plangonaut command — looks correct in every
  * editor and is refused by `JSON.parse`. The tutorial documented a workaround
  * (`[System.IO.File]::WriteAllText`) for a defect that should not have needed
  * one (ALN-009).
@@ -522,13 +791,16 @@ function stripLeadingBom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-function readJson(location: string): any {
+function readJson(location: string, kind: ErrorKind = "COMMAND_FAILED"): any {
   try {
     const value = JSON.parse(stripLeadingBom(fs.readFileSync(location, "utf8")));
     if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("expected an object");
     return value;
   } catch (error: any) {
-    throw new BeaveError(`Cannot read JSON ${location}: ${error.message}`);
+    // The caller says what an unreadable file means here: a corrupt state file
+    // is an untrustworthy project, while a malformed file somebody passed on the
+    // command line is just a bad argument.
+    throw new PlangonautError(`Cannot read JSON ${location}: ${error.message}`, kind);
   }
 }
 
@@ -677,31 +949,31 @@ function diffValue(before: unknown, after: unknown, at: Array<string | number>, 
 }
 
 function applyPatch(base: unknown, ops: unknown): unknown {
-  if (!Array.isArray(ops)) throw new BeaveError("Event carries no state patch; it was written by an engine that did not record one.");
+  if (!Array.isArray(ops)) throw new PlangonautError("Event carries no state patch; it was written by an engine that did not record one.");
   let root: any = base === undefined || base === null ? null : structuredClone(base);
   for (const candidate of ops) {
     const op = candidate as PatchOp;
-    if (!op || typeof op !== "object" || !Array.isArray(op.path)) throw new BeaveError(`Malformed patch operation: ${JSON.stringify(candidate)}`);
-    if (op.op !== "set" && op.op !== "del" && op.op !== "trim") throw new BeaveError(`Unsupported patch operation "${(op as any).op}"; this engine reads reducer version ${REDUCER_VERSION}.`);
+    if (!op || typeof op !== "object" || !Array.isArray(op.path)) throw new PlangonautError(`Malformed patch operation: ${JSON.stringify(candidate)}`);
+    if (op.op !== "set" && op.op !== "del" && op.op !== "trim") throw new PlangonautError(`Unsupported patch operation "${(op as any).op}"; this engine reads reducer version ${REDUCER_VERSION}.`);
     if (!op.path.length) {
-      if (op.op !== "set") throw new BeaveError(`Patch operation "${op.op}" cannot apply to the whole state.`);
+      if (op.op !== "set") throw new PlangonautError(`Patch operation "${op.op}" cannot apply to the whole state.`);
       root = structuredClone(op.value);
       continue;
     }
     let cursor: any = root;
     for (let index = 0; index < op.path.length - 1; index += 1) {
       const key = op.path[index];
-      if (cursor === null || typeof cursor !== "object") throw new BeaveError(`Patch path ${op.path.join("/")} does not exist in the state being rebuilt.`);
+      if (cursor === null || typeof cursor !== "object") throw new PlangonautError(`Patch path ${op.path.join("/")} does not exist in the state being rebuilt.`);
       if (cursor[key] === undefined) cursor[key] = typeof op.path[index + 1] === "number" ? [] : {};
       cursor = cursor[key];
     }
-    if (cursor === null || typeof cursor !== "object") throw new BeaveError(`Patch path ${op.path.join("/")} does not exist in the state being rebuilt.`);
+    if (cursor === null || typeof cursor !== "object") throw new PlangonautError(`Patch path ${op.path.join("/")} does not exist in the state being rebuilt.`);
     const last = op.path[op.path.length - 1];
     if (op.op === "set") cursor[last] = structuredClone(op.value);
     else if (op.op === "del") delete cursor[last];
     else {
       const target = cursor[last];
-      if (!Array.isArray(target)) throw new BeaveError(`Patch tried to trim ${op.path.join("/")}, which is not a list.`);
+      if (!Array.isArray(target)) throw new PlangonautError(`Patch tried to trim ${op.path.join("/")}, which is not a list.`);
       target.length = Number(op.value);
     }
   }
@@ -775,7 +1047,7 @@ let activeTransaction: TransactionHandle | null = null;
  * what they observe is what a killed process leaves behind.
  */
 function faultPoint(label: string): void {
-  if (process.env.BEAVE_FAULT_AT === label) {
+  if (readEnv("PLANGONAUT_FAULT_AT") === label) {
     process.stderr.write(`BEAVE FAULT INJECTED: ${label}\n`);
     process.exit(97);
   }
@@ -806,7 +1078,7 @@ function faultPoint(label: string): void {
 //  - **held by another host, or unreadable** — refused, and no amount of waiting
 //    changes it: this engine cannot ask a machine it cannot see whether a PID is
 //    alive, and guessing would be how a shared folder loses a day's work. It
-//    takes an explicit `beave unlock --force`.
+//    takes an explicit `plangonaut unlock --force`.
 // ---------------------------------------------------------------------------
 
 const LOCK_FILE = "lock.json";
@@ -901,13 +1173,13 @@ function readLockRecord(file: string, patient = false): LockRecord | null {
 }
 
 function describeLock(record: LockRecord | null, file: string): string {
-  if (!record) return `The lock file at ${file} cannot be read, so Beave cannot tell whether anything holds it.`;
+  if (!record) return `The lock file at ${file} cannot be read, so Plangonaut cannot tell whether anything holds it.`;
   // A record with no host does not name a machine called "undefined".
   if (typeof record.host !== "string" || !record.host.trim()) {
-    return `Held by ${record.command ?? "a Beave command"} as process ${record.pid}, on a machine the lock does not name, since ${record.at}.`;
+    return `Held by ${record.command ?? "a Plangonaut command"} as process ${record.pid}, on a machine the lock does not name, since ${record.at}.`;
   }
   return (
-    `Held by ${record.command ?? "a Beave command"} as process ${record.pid} on ${record.host}, since ${record.at}` +
+    `Held by ${record.command ?? "a Plangonaut command"} as process ${record.pid} on ${record.host}, since ${record.at}` +
     `${record.operation_id ? `, operation ${record.operation_id}` : ""}` +
     `${record.observed_revision === null || record.observed_revision === undefined ? "" : `, at revision ${record.observed_revision}`}.`
   );
@@ -933,9 +1205,9 @@ function describeLock(record: LockRecord | null, file: string): string {
  * counter-example costs to produce.
  */
 function testSyncPoint(at: "locked" | "read" = "locked"): void {
-  const marker = process.env.BEAVE_TEST_SYNC;
+  const marker = readEnv("PLANGONAUT_TEST_SYNC");
   if (!marker) return;
-  if ((process.env.BEAVE_TEST_SYNC_AT ?? "locked") !== at) return;
+  if ((readEnv("PLANGONAUT_TEST_SYNC_AT") ?? "locked") !== at) return;
   fs.mkdirSync(path.dirname(marker), { recursive: true });
   fs.writeFileSync(`${marker}.ready`, `${process.pid}\n`);
   const deadline = Date.now() + 60_000;
@@ -993,8 +1265,8 @@ function acquireProjectLock(root: string, command: string): void {
    * process that has disabled the exclusion it depends on must not look like an
    * ordinary one in a log.
    */
-  if (process.env.BEAVE_TEST_UNSAFE_NO_LOCK === "1") {
-    process.stderr.write(`beave: BEAVE_TEST_UNSAFE_NO_LOCK is set - running WITHOUT the project lock (${command}). This is a test seam and it is not safe.\n`);
+  if (readEnv("PLANGONAUT_TEST_UNSAFE_NO_LOCK") === "1") {
+    process.stderr.write(`plangonaut: PLANGONAUT_TEST_UNSAFE_NO_LOCK is set - running WITHOUT the project lock (${command}). This is a test seam and it is not safe.\n`);
     return;
   }
   const file = lockFile(root);
@@ -1028,24 +1300,24 @@ function acquireProjectLock(root: string, command: string): void {
 
     const existing = readLockRecord(file, true);
     if (existing === null) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `This project is locked and the lock cannot be read: ${path.relative(root, file).replaceAll("\\", "/")}. ` +
-          `Beave will not remove a lock it cannot understand, and neither will \`beave unlock --force\`: it has no way to tell whether a process is holding it. ` +
-          `Make sure no Beave command is running on this project, then delete that file yourself.`,
+          `Plangonaut will not remove a lock it cannot understand, and neither will \`plangonaut unlock --force\`: it has no way to tell whether a process is holding it. ` +
+          `Make sure no Plangonaut command is running on this project, then delete that file yourself.`,
       );
     }
     if (typeof existing.host !== "string" || !existing.host.trim() || existing.host !== os.hostname()) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `This project is locked by another machine. ${describeLock(existing, file)} ` +
-          `Beave cannot ask that host whether the process is still running, so it will not take the lock on its own. ` +
-          `If you are certain nothing is using the project, release it with: beave unlock --project-root . --force`,
+          `Plangonaut cannot ask that host whether the process is still running, so it will not take the lock on its own. ` +
+          `If you are certain nothing is using the project, release it with: plangonaut unlock --project-root . --force`,
       );
     }
     const holderAlive = processIsAlive(existing.pid);
     if (holderAlive === null) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `This project is locked and the lock does not say which process holds it: ${path.relative(root, file).replaceAll("\\", "/")} records \`pid: ${JSON.stringify(existing.pid)}\`. ` +
-          `Beave will not take a lock it cannot reason about. Make sure no Beave command is running, then delete that file yourself.`,
+          `Plangonaut will not take a lock it cannot reason about. Make sure no Plangonaut command is running, then delete that file yourself.`,
       );
     }
     if (holderAlive === false) {
@@ -1063,8 +1335,8 @@ function acquireProjectLock(root: string, command: string): void {
       continue;
     }
     if (Date.now() >= deadline) {
-      throw new BeaveError(
-        `This project is in use by another Beave process and did not become free within ${Math.round(LOCK_WAIT_MS / 1000)} seconds. ` +
+      throw new PlangonautError(
+        `This project is in use by another Plangonaut process and did not become free within ${Math.round(LOCK_WAIT_MS / 1000)} seconds. ` +
           `${describeLock(existing, file)} Nothing was changed. Wait for it to finish and run the same command again.`,
       );
     }
@@ -1140,9 +1412,9 @@ function unlock(flags: Flags): void {
   const host = typeof record?.host === "string" ? record.host.trim() : "";
   if (record !== null && !host) {
     console.log(`The lock at ${relative} does not say which machine holds it, and it records \`pid: ${JSON.stringify(record.pid)}\`.`);
-    console.log("  state       unreadable: a lock with no host is one Beave cannot reason about");
-    console.log(`\nNothing was changed, and --force will not change it either. Make sure no Beave command is running, then delete ${relative} yourself.`);
-    if (flags.force === true) throw new BeaveError(`Refusing to force a lock that does not name the machine holding it: ${relative}. Nothing was changed.`);
+    console.log("  state       unreadable: a lock with no host is one Plangonaut cannot reason about");
+    console.log(`\nNothing was changed, and --force will not change it either. Make sure no Plangonaut command is running, then delete ${relative} yourself.`);
+    if (flags.force === true) throw new PlangonautError(`Refusing to force a lock that does not name the machine holding it: ${relative}. Nothing was changed.`);
     return;
   }
   const mine = record !== null && host === os.hostname();
@@ -1153,13 +1425,13 @@ function unlock(flags: Flags): void {
 
   if (flags.force !== true) {
     console.log(describeLock(record, relative));
-    if (alive === null) console.log("  state       unreadable: Beave cannot tell what holds it, or whether anything does");
+    if (alive === null) console.log("  state       unreadable: Plangonaut cannot tell what holds it, or whether anything does");
     else if (!mine) console.log("  state       held by another machine, which this engine cannot ask about");
     else if (alive) console.log("  state       the process is still running on this machine");
     else console.log("  state       the process that took it is gone from this machine");
     console.log(
       alive === null
-        ? `\nNothing was changed, and --force will not change it either: a lock Beave cannot read is a lock it cannot reason about. Make sure no Beave command is running, then delete ${relative} yourself.`
+        ? `\nNothing was changed, and --force will not change it either: a lock Plangonaut cannot read is a lock it cannot reason about. Make sure no Plangonaut command is running, then delete ${relative} yourself.`
         : alive
           ? "\nNothing was changed. A running command is not an abandoned one: wait for it, or stop that process first."
           : "\nNothing was changed. Run the same command with --force to release it.",
@@ -1174,20 +1446,20 @@ function unlock(flags: Flags): void {
      * removed a lock a running process was holding — while the acquisition
      * message was busy telling the user to do exactly that.
      *
-     * There is no safe automatic answer here: Beave cannot tell whether anything
+     * There is no safe automatic answer here: Plangonaut cannot tell whether anything
      * holds it. So it refuses and hands the decision to a person, in the same
      * words it uses for a journal it cannot read.
      */
-    throw new BeaveError(
-      `${record === null ? "This lock cannot be read" : `This lock records \`pid: ${JSON.stringify(record.pid)}\`, which is not a process id`}, so Beave cannot tell whether a process is holding it: ${relative}. ` +
-        `--force will not remove it — that is how a running command loses its work. Make sure no Beave command is running on this project, then delete that file yourself. Nothing was changed.`,
+    throw new PlangonautError(
+      `${record === null ? "This lock cannot be read" : `This lock records \`pid: ${JSON.stringify(record.pid)}\`, which is not a process id`}, so Plangonaut cannot tell whether a process is holding it: ${relative}. ` +
+        `--force will not remove it — that is how a running command loses its work. Make sure no Plangonaut command is running on this project, then delete that file yourself. Nothing was changed.`,
     );
   }
 
   if (alive) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `The process holding this lock is still running on this machine. ${describeLock(record, relative)} ` +
-        `Beave will not take a lock from a live process, with or without --force: stop that process first. Nothing was changed.`,
+        `Plangonaut will not take a lock from a live process, with or without --force: stop that process first. Nothing was changed.`,
     );
   }
   fs.rmSync(file, { force: true });
@@ -1230,7 +1502,7 @@ function beginFileTransaction(root: string, event: any, locations: string[]): st
   const unique = [...new Set([path.join(stateRoot(root), "state.json"), path.join(stateRoot(root), "events.jsonl"), ...locations].map((item) => path.resolve(item)))];
   const files = unique.map((location, index) => {
     const relative = path.relative(root, location);
-    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new BeaveError(`Transaction path escapes project root: ${location}`);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new PlangonautError(`Transaction path escapes project root: ${location}`);
     const existed = fs.existsSync(location);
     const backup = existed ? `backup-${index}` : null;
     if (existed) copyFileCreatingParents(location, path.join(directory, backup!));
@@ -1242,7 +1514,7 @@ function beginFileTransaction(root: string, event: any, locations: string[]): st
     };
   });
   writeJournal(directory, {
-    format: "beave-file-transaction-v2",
+    format: FILE_TRANSACTION_FORMAT,
     phase: "PREPARED" satisfies TransactionPhase,
     event_id: event.event_id,
     event_type: event.type,
@@ -1312,9 +1584,9 @@ function rollForwardTransaction(root: string, directory: string, journal: any): 
    * directory, and it changes nothing.
    */
   if (!staged || !fs.existsSync(stagedStateFile)) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `Transaction ${journal.event_id} (${journal.event_type ?? "operation"}) passed the point of no return and its staged result is not there, so it can neither be completed nor safely undone. Nothing was changed.\n` +
-        `Inspect ${path.relative(root, directory).replaceAll("\\", "/")}. If you are certain the operation should be abandoned, remove that directory and run: beave replay --project-root . --repair --operation-id <id>`,
+        `Inspect ${path.relative(root, directory).replaceAll("\\", "/")}. If you are certain the operation should be abandoned, remove that directory and run: plangonaut replay --project-root . --repair --operation-id <id>`,
     );
   }
   const stagedState = fs.readFileSync(stagedStateFile, "utf8");
@@ -1398,10 +1670,10 @@ function recoverFileTransactions(root: string): void {
     } catch {
       // Damage, and the honest answer is to say so rather than to die on a raw
       // JSON error inside whatever command happened to be entering the project.
-      throw new BeaveError(
+      throw new PlangonautError(
         `The journal of an interrupted operation cannot be read: ${path.relative(root, journalFile).replaceAll("\\", "/")}. ` +
-          `Beave will not guess what it was doing, so nothing has been changed. Run \`beave recover --project-root .\` to see what is there; ` +
-          `once you have looked at it, remove that directory and run \`beave replay --project-root . --verify\` to check what the project is.`,
+          `Plangonaut will not guess what it was doing, so nothing has been changed. Run \`plangonaut recover --project-root .\` to see what is there; ` +
+          `once you have looked at it, remove that directory and run \`plangonaut replay --project-root . --verify\` to check what the project is.`,
       );
     }
     const notes: string[] = [];
@@ -1575,7 +1847,7 @@ function canonicalOperationInput(command: string, flags: Flags): unknown {
 
 function idempotencyKey(flags: Flags): string {
   const operationId = required(flags, "operation-id").trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(operationId)) throw new BeaveError(`Invalid --operation-id; use 3-128 letters, numbers, '.', '_', ':' or '-'`);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(operationId)) throw new PlangonautError(`Invalid --operation-id; use 3-128 letters, numbers, '.', '_', ':' or '-'`);
   // Both digests are computed, every time. The new one is what a new event
   // records; the old one is the only way to recognise an event written before
   // today, and recognising those is not optional — an unrecognised completed
@@ -1650,10 +1922,10 @@ function checkIdempotency(root: string, key: string): boolean {
         : pendingOperation.legacyPayloadHash
       : null;
     if (pendingOperation && event.operation_id === pendingOperation.id && event.operation_payload_hash !== mine) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `Operation ID ${pendingOperation.id} was already used with different input: it recorded ${event.type ?? "an event"} at revision ${event.state_revision ?? "?"}, ${event.at ?? "an earlier instant"}. No changes written.
 ` +
-          `If you are retrying an interrupted operation, it already finished - \`beave status --project-root .\` shows it, and repeating it is not needed. ` +
+          `If you are retrying an interrupted operation, it already finished - \`plangonaut status --project-root .\` shows it, and repeating it is not needed. ` +
           `If this is new work, give it a new operation id.`,
       );
     }
@@ -1678,10 +1950,10 @@ function checkIdempotency(root: string, key: string): boolean {
      * the conservative direction, because the alternative discards their work.
      */
     if (matches && pendingOperation && Number(event.operation_payload_version ?? 1) < OPERATION_INPUT_VERSION && pendingOperation.fileInputs.length) {
-      throw new BeaveError(
-        `Operation ID ${pendingOperation.id} was recorded by an earlier version of Beave, and this command reads ${pendingOperation.fileInputs.map((key) => `--${key}`).join(", ")}.\n` +
-          `That older record digested the *path* of a file and not its content, so Beave cannot tell whether this is the same operation or the same filename holding something new — and answering "already applied" would throw away whatever the file says now. Nothing was written.\n` +
-          `If the earlier operation completed, there is nothing to do: \`beave status --project-root .\` and \`beave validate --project-root .\` show the recorded result. If this is new input, give it a new operation id.`,
+      throw new PlangonautError(
+        `Operation ID ${pendingOperation.id} was recorded by an earlier version of Plangonaut, and this command reads ${pendingOperation.fileInputs.map((key) => `--${key}`).join(", ")}.\n` +
+          `That older record digested the *path* of a file and not its content, so Plangonaut cannot tell whether this is the same operation or the same filename holding something new — and answering "already applied" would throw away whatever the file says now. Nothing was written.\n` +
+          `If the earlier operation completed, there is nothing to do: \`plangonaut status --project-root .\` and \`plangonaut validate --project-root .\` show the recorded result. If this is new input, give it a new operation id.`,
       );
     }
     return matches;
@@ -1690,7 +1962,7 @@ function checkIdempotency(root: string, key: string): boolean {
 
 function assertNotBlocked(state: State): void {
   if (state.needs_reconciliation) {
-    throw new BeaveError("State is BLOCKED pending human reconciliation. Resolve open overrides before continuing.");
+    throw new PlangonautError("State is BLOCKED pending human reconciliation. Resolve open overrides before continuing.");
   }
 }
 
@@ -1703,8 +1975,8 @@ function assertNotBlocked(state: State): void {
 function divergenceRefusal(): string {
   return (
     "The state on disk does not match the history that produced it: its digest is not the one the last event recorded. " +
-    "Something rewrote .beave/state.json outside Beave. Nothing was written. " +
-    "Run `beave replay --project-root . --verify` to see exactly which fields differ, then either restore the file or rebuild it with `beave replay --project-root . --repair --operation-id <id>`."
+    "Something rewrote .beave/state.json outside Plangonaut. Nothing was written. " +
+    "Run `plangonaut replay --project-root . --verify` to see exactly which fields differ, then either restore the file or rebuild it with `plangonaut replay --project-root . --repair --operation-id <id>`."
   );
 }
 
@@ -1728,7 +2000,7 @@ function commitState(root: string, location: string, state: State, event: any, o
   }
   const errors = stateErrors(root, state, event);
   if (errors.length) {
-    throw new BeaveError(`Transaction failed validation:\n- ${errors.join("\n- ")}`);
+    throw new PlangonautError(`Transaction failed validation:\n- ${errors.join("\n- ")}`);
   }
 
   const before = fs.existsSync(location) ? readJson(location) : null;
@@ -1737,7 +2009,7 @@ function commitState(root: string, location: string, state: State, event: any, o
   // the previous event recorded a digest: a project whose history predates this
   // format carries none, and no check is invented for it.
   if (tail?.event?.state_sha256 && digestOf(before) !== tail.event.state_sha256) {
-    throw new BeaveError(divergenceRefusal());
+    throw new PlangonautError(divergenceRefusal());
   }
 
   const patch: PatchOp[] = [];
@@ -1746,7 +2018,7 @@ function commitState(root: string, location: string, state: State, event: any, o
   const stateAfter = digestOf(state);
   const rebuilt = digestOf(applyPatch(before, patch));
   if (rebuilt !== stateAfter) {
-    throw new BeaveError("Internal: the mutation this event would record does not reproduce the state it describes. Nothing was written. This is a defect in the engine, not in the project.");
+    throw new PlangonautError("Internal: the mutation this event would record does not reproduce the state it describes. Nothing was written. This is a defect in the engine, not in the project.");
   }
 
   Object.assign(event, {
@@ -1835,11 +2107,11 @@ function replayFromEvents(root: string): ReplayOutcome {
     }
     if (typeof event.format !== "number") continue;
     if (event.format > EVENT_FORMAT) {
-      return { ...empty, reason: `Line ${index + 1} was written in event format ${event.format}; this engine reads up to ${EVENT_FORMAT}. Upgrade Beave rather than replaying it with an older reader.` };
+      return { ...empty, reason: `Line ${index + 1} was written in event format ${event.format}; this engine reads up to ${EVENT_FORMAT}. Upgrade Plangonaut rather than replaying it with an older reader.` };
     }
     const expected = index === 0 ? null : sha256(lines[index - 1].line);
     if ((event.previous_event_sha256 ?? null) !== expected) {
-      return { ...empty, reason: `The event chain breaks at line ${index + 1} (${event.type}): it records a different predecessor than the line before it. The history was edited outside Beave.` };
+      return { ...empty, reason: `The event chain breaks at line ${index + 1} (${event.type}): it records a different predecessor than the line before it. The history was edited outside Plangonaut.` };
     }
     /*
      * The event's own digest, checked rather than merely stored.
@@ -1870,7 +2142,7 @@ function replayFromEvents(root: string): ReplayOutcome {
       ...empty,
       reason:
         "This project's history has no point the state can be rebuilt from. Its events were written by an engine that recorded digests of each change rather than the change itself, so they cannot be replayed and nothing will be invented for them. " +
-        "Record a starting point with `beave baseline --project-root . --reason \"<why>\" --owner <name> --operation-id <id>`: everything from there on is reproducible, and everything before it stays in the file, unproven and marked as such.",
+        "Record a starting point with `plangonaut baseline --project-root . --reason \"<why>\" --owner <name> --operation-id <id>`: everything from there on is reproducible, and everything before it stays in the file, unproven and marked as such.",
     };
   }
 
@@ -1969,7 +2241,7 @@ function replaySummary(root: string, outcome: ReplayOutcome, current: any): { ok
   }
   lines.push("History replay: DIVERGED. The state on disk is not what its own events produce.");
   lines.push(...describeDifferences(current, outcome.state));
-  lines.push("Repair it with: beave replay --project-root . --repair --operation-id <id>");
+  lines.push("Repair it with: plangonaut replay --project-root . --repair --operation-id <id>");
   return { ok: false, lines };
 }
 
@@ -1980,7 +2252,7 @@ function replay(flags: Flags): void {
   // for both is a caller who has not decided which one they want, and an option
   // this engine accepts and ignores is the defect it refuses everywhere else.
   if (repair && flags.verify === true) {
-    throw new BeaveError("--verify and --repair ask for different things: one reads and reports, the other writes. Choose one. Nothing was changed.");
+    throw new PlangonautError("--verify and --repair ask for different things: one reads and reports, the other writes. Choose one. Nothing was changed.");
   }
   if (!repair) {
     // Verification changes nothing, so it does not run recovery either: a
@@ -1989,10 +2261,10 @@ function replay(flags: Flags): void {
     if (!fs.existsSync(location)) {
       // The command the contract recommends for diagnosing a project must say
       // something useful about the one shape of damage it exists to repair.
-      throw new BeaveError(
+      throw new PlangonautError(
         fs.existsSync(path.join(stateRoot(root), "events.jsonl"))
-          ? `.beave/state.json is missing, and the event history is still here. Rebuild the state from it:\n  beave replay --project-root . --repair --operation-id <id>\nNothing was changed.`
-          : `No Beave state at ${stateRoot(root)}`,
+          ? `.beave/state.json is missing, and the event history is still here. Rebuild the state from it:\n  plangonaut replay --project-root . --repair --operation-id <id>\nNothing was changed.`
+          : `No Plangonaut state at ${stateRoot(root)}`,
       );
     }
     const current = readJson(location);
@@ -2004,12 +2276,12 @@ function replay(flags: Flags): void {
     const pending = pendingTransactions(root);
     if (pending.length) {
       console.log(`${pending.length} operation${pending.length === 1 ? " was" : "s were"} interrupted and ${pending.length === 1 ? "is" : "are"} waiting to be resolved: ${pending.map((item) => `${item.journal.event_type ?? "operation"} (${item.journal.phase})`).join(", ")}.`);
-      console.log(`Any command that touches this project resolves them, or run \`beave recover --project-root . --apply\`. Until then the comparison below describes a project that is mid-operation.`);
+      console.log(`Any command that touches this project resolves them, or run \`plangonaut recover --project-root . --apply\`. Until then the comparison below describes a project that is mid-operation.`);
     }
     const outcome = replayFromEvents(root);
     const summary = replaySummary(root, outcome, current);
     for (const line of summary.lines) console.log(line);
-    if (!summary.ok) throw new BeaveError("The project state cannot be verified against its history.");
+    if (!summary.ok) throw new PlangonautError("The project state cannot be verified against its history.");
     return;
   }
 
@@ -2027,7 +2299,7 @@ function replay(flags: Flags): void {
   const current = fs.existsSync(location) ? (readJson(location) as State) : null;
   if (checkIdempotency(root, key)) return console.log(`Idempotent retry: this repair is already recorded.`);
   const outcome = replayFromEvents(root);
-  if (!outcome.replayable) throw new BeaveError(`Nothing can be rebuilt: ${outcome.reason}`);
+  if (!outcome.replayable) throw new PlangonautError(`Nothing can be rebuilt: ${outcome.reason}`);
   if (current !== null && digestOf(outcome.state) === digestOf(current)) {
     return console.log("Nothing to repair: the state already matches its history exactly.");
   }
@@ -2096,7 +2368,7 @@ function replay(flags: Flags): void {
   if (event.state_backup) console.log(`What the file said before is preserved at ${event.state_backup}.`);
   else console.log(`There was no state file to preserve: it was missing, and the history is where this came from.`);
   for (const line of differences) console.log(line);
-  console.log(`Recorded as ${eventId}. Run \`beave validate --project-root .\` to confirm.`);
+  console.log(`Recorded as ${eventId}. Run \`plangonaut validate --project-root .\` to confirm.`);
 }
 
 /**
@@ -2114,7 +2386,7 @@ function baseline(flags: Flags): void {
   if (checkIdempotency(root, key)) return console.log(`Idempotent retry: this baseline is already recorded.`);
   assertKnownOwner(state, required(flags, "owner"));
   const reason = required(flags, "reason").trim();
-  if (!reason) throw new BeaveError("--reason cannot be empty: a baseline records why the history before it is not reproducible.");
+  if (!reason) throw new PlangonautError("--reason cannot be empty: a baseline records why the history before it is not reproducible.");
 
   const existing = replayFromEvents(root);
   if (existing.replayable && digestOf(existing.state) === digestOf(state)) {
@@ -2294,17 +2566,17 @@ function recover(flags: Flags): void {
 
   recoverFileTransactions(root);
   if (pending.length) console.log(`${pending.length} interrupted operation${pending.length === 1 ? "" : "s"} resolved; the receipts are under .beave/recovery/.`);
-  console.log(`Run \`beave replay --project-root . --verify\` to see what the project is now.`);
+  console.log(`Run \`plangonaut replay --project-root . --verify\` to see what the project is now.`);
 }
 
 function assertPendingState(root: string, state: State, event: any): void {
   const errors = stateErrors(root, state, event);
-  if (errors.length) throw new BeaveError(`Transaction preflight failed:\n- ${errors.join("\n- ")}\nNo changes written.`);
+  if (errors.length) throw new PlangonautError(`Transaction preflight failed:\n- ${errors.join("\n- ")}\nNo changes written.`);
 }
 
 function assertKnownOwner(state: any, owner: string): void {
   const known = new Set(Object.values(state.decision_owners ?? {}).map((value) => String(value).trim()));
-  if (!known.has(owner.trim())) throw new BeaveError(`Owner is not one of the confirmed decision owners: ${owner}`);
+  if (!known.has(owner.trim())) throw new PlangonautError(`Owner is not one of the confirmed decision owners: ${owner}`);
 }
 
 function questionnaire(): any[] {
@@ -2321,7 +2593,7 @@ function questionnaire(): any[] {
     }
   }
   if (modules.map((item) => item.id).join(",") !== Array.from({ length: 17 }, (_, index) => index).join(",")) {
-    throw new BeaveError("Questionnaire module IDs must be 0..16");
+    throw new PlangonautError("Questionnaire module IDs must be 0..16");
   }
   return modules;
 }
@@ -2334,13 +2606,22 @@ function loadState(root: string): { location: string; state: State } {
   // that can be rebuilt, and saying so is more use than the ENOENT this used to
   // raise from four different commands.
   if (!fs.existsSync(location) && fs.existsSync(path.join(stateRoot(root), "events.jsonl"))) {
-    throw new BeaveError(
+    // A history without a state is a project whose records disagree with each
+    // other, not a folder without a project: there is something here to repair.
+    throw new PlangonautError(
       `.beave/state.json is missing, and the event history is still here. Rebuild the state from it:\n` +
-        `  beave replay --project-root . --repair --operation-id <id>\n` +
+        `  plangonaut replay --project-root . --repair --operation-id <id>\n` +
         `Nothing was changed.`,
+      "PROJECT_STATE_UNTRUSTED",
     );
   }
-  const state = readJson(location) as State;
+  if (!fs.existsSync(location)) {
+    throw new PlangonautError(
+      `No Plangonaut project at ${root}: there is no ${STATE_DIR}/state.json, and no ${LEGACY_STATE_DIR}/state.json either. Create one with \`plangonaut init --project-root . --project-name NAME --project-mode Genesis --interaction-mode Standard --owners-file owners.json --operation-id <id>\`.`,
+      "NOT_PLANGONAUT_PROJECT",
+    );
+  }
+  const state = readJson(location, "PROJECT_STATE_UNTRUSTED") as State;
   // The revision this command is working from, written into the lock so a second
   // process can say what it is waiting behind rather than only that it is waiting.
   noteObservedRevision(Number(state?.revision ?? 0));
@@ -2382,6 +2663,116 @@ function detectCycles(dependencies: Dependency[]): string[] {
   return cycles;
 }
 
+/**
+ * One recorded blocker.
+ *
+ * `RESOLVED` keeps the record. Deleting it would erase the only evidence the
+ * project was ever held up, which is the part of the history most worth keeping:
+ * a blocker that happened and was cleared is a fact about how the work went.
+ */
+interface Blocker {
+  id: string;
+  title: string;
+  reason: string;
+  status: "OPEN" | "RESOLVED";
+  owner: string;
+  recorded_at: string;
+  evidence?: { path: string; sha256: string };
+  resolved_at?: string;
+  resolved_by?: string;
+  resolution?: string;
+  revision: number;
+  updated_at: string;
+}
+
+/** Somebody looked, found nothing open, and put their name to it. */
+interface BlockerVerification {
+  at: string;
+  by: string;
+  /** The state revision that was verified. A later one is not covered by it. */
+  state_revision: number;
+  event_id: string;
+  note?: string;
+}
+
+const BLOCKER_STATUSES = new Set(["OPEN", "RESOLVED"]);
+
+/** Every entry, whatever shape it was written in. */
+function blockerEntries(state: State): (string | Blocker)[] {
+  return Array.isArray(state.blockers) ? state.blockers : [];
+}
+
+/** The typed records only. Legacy strings are not records and never become them. */
+function blockerRecords(state: State): Blocker[] {
+  return blockerEntries(state).filter((item): item is Blocker => typeof item === "object" && item !== null);
+}
+
+/** Entries nobody has recorded as resolved. Legacy strings are all of them. */
+function openBlockers(state: State): (string | Blocker)[] {
+  return blockerEntries(state).filter((item) => (typeof item === "string" ? true : item.status !== "RESOLVED"));
+}
+
+/**
+ * What a zero is worth, said next to the zero.
+ *
+ * It used to read "(nothing writes that ledger, so this is not a verified zero)"
+ * unconditionally, which was true and is not any more. A zero now means one of
+ * three things and the reader is told which: verified by somebody, or merely
+ * nothing recorded, or everything recorded has been resolved without anyone
+ * checking since.
+ */
+/**
+ * The blocker section every human output shares.
+ *
+ * Open ones first, because they are what stops work; resolved ones after, kept
+ * rather than dropped — a blocker that happened and was cleared is part of how
+ * the project went, and the ledger is where that is written down.
+ */
+function blockerReportLines(state: State): string[] {
+  const entries = blockerEntries(state);
+  const open = openBlockers(state);
+  const resolved = blockerRecords(state).filter((item) => item.status === "RESOLVED");
+  const verification = state.blockers_none_verified;
+
+  if (!entries.length) {
+    return [
+      verification
+        ? `- None. ${verification.by} verified at ${verification.at} that no blocker is open, against revision ${verification.state_revision}.`
+        : "- None recorded, and nobody has recorded that they looked. An empty ledger is not evidence that the project has none: record what you find with `plangonaut blocker-record`, or record the absence with `plangonaut blocker-verify-none`.",
+    ];
+  }
+
+  const lines: string[] = [];
+  if (open.length) lines.push(...open.map((item) => `- OPEN: ${blockerLine(item)}`));
+  else if (verification) {
+    lines.push(`- No blocker is open. ${verification.by} verified this at ${verification.at}, against revision ${verification.state_revision}.`);
+  } else {
+    lines.push("- No blocker is open, and nobody has verified it since the last one was resolved. Record that with `plangonaut blocker-verify-none` if it is true.");
+  }
+  if (resolved.length) lines.push(...resolved.map((item) => `- RESOLVED: ${blockerLine(item)}`));
+  return lines;
+}
+
+function blockerZeroCaveat(state: State, open: number): string {
+  if (open !== 0) return "";
+  const verification = state.blockers_none_verified;
+  if (verification) return ` (verified by ${verification.by} at ${verification.at})`;
+  if (blockerEntries(state).length) {
+    return " (every recorded blocker is resolved, but nobody has verified since that none is open)";
+  }
+  return " (nothing is recorded and nobody has verified it, so this is not a verified zero)";
+}
+
+/** One line for a human, whichever shape the entry has. */
+function blockerLine(entry: string | Blocker): string {
+  if (typeof entry === "string") {
+    return `${entry} (recorded as free text before the blocker ledger existed: no owner, no date, and no recorded status, so it is counted as open)`;
+  }
+  const head = `${entry.id} ${entry.title} — ${entry.status}, recorded by ${entry.owner} at ${entry.recorded_at}`;
+  if (entry.status !== "RESOLVED") return `${head}. Reason: ${entry.reason}`;
+  return `${head}. Reason: ${entry.reason}. Resolved by ${entry.resolved_by} at ${entry.resolved_at}: ${entry.resolution}`;
+}
+
 const LEDGER_RULES: Record<string, { prefix: string; statuses?: Set<string>; array: keyof State }> = {
   decision: { prefix: "DEC", statuses: new Set(["PROPOSED", "APPROVED", "REJECTED", "SUPERSEDED"]), array: "decisions" },
   requirement: { prefix: "REQ", statuses: new Set(["DRAFT", "ACTIVE", "DEFERRED", "OBSOLETE"]), array: "requirements" },
@@ -2400,7 +2791,7 @@ const LEDGER_RULES: Record<string, { prefix: string; statuses?: Set<string>; arr
 // false negative would print one that is merely noise. Both are recoverable, and
 // the list is exact rather than fuzzy for that reason.
 const GENERATED_NEXT_ACTIONS: RegExp[] = [
-  /^Run `beave next --project-root \.` and discuss module 1\.$/,
+  /^Run `plangonaut next --project-root \.` and discuss module 1\.$/,
   /^Discuss module \d+ — [\s\S]*\.$/,
   /^Review coverage, then proceed to G2\.$/,
   /^Reconcile OVR-[a-f0-9]+(?:: identify impacted decisions, artifacts, tasks, agents, tests, and gates\.| before continuing\.)$/,
@@ -2408,7 +2799,7 @@ const GENERATED_NEXT_ACTIONS: RegExp[] = [
   /^Proceed to G\d+\.$/,
   /^Proceed to G\d+\. G\d+ passed with a condition owned by [\s\S]+, to review by \d{4}-\d{2}-\d{2}: [\s\S]+$/,
   /^Resolve blockers for G\d+ and retry\.$/,
-  /^Answer the open questions? \(QNA-\d{4,}(?:, QNA-\d{4,})*\) with beave qa-answer, then settle (?:it|each) with beave qa-settle\.$/,
+  /^Answer the open questions? \(QNA-\d{4,}(?:, QNA-\d{4,})*\) with plangonaut qa-answer, then settle (?:it|each) with plangonaut qa-settle\.$/,
   /*
    * `qa-settle` writes these, and they were missing from this list — so the
    * engine treated its own sentence as a person's and refused to move it. A
@@ -2428,7 +2819,7 @@ const GENERATED_NEXT_ACTIONS: RegExp[] = [
    */
   /^Ask QNA-\d{4,}: [\s\S]*$/,
   /^Continue the interview from QNA-\d{4,}; no next question is recorded yet\.$/,
-  /^The interview has nothing open\. Ask the next question with beave qa-ask, or record what module \d+ has settled\.$/,
+  /^The interview has nothing open\. Ask the next question with plangonaut qa-ask, or record what module \d+ has settled\.$/,
 ];
 
 /**
@@ -2459,9 +2850,9 @@ function openQuestionsSentence(state: State): string {
     .map((item: any) => item.id);
   if (!open.length) {
     const active = activeModule(state);
-    return `The interview has nothing open. Ask the next question with beave qa-ask, or record what module ${active ? active.id : 1} has settled.`;
+    return `The interview has nothing open. Ask the next question with plangonaut qa-ask, or record what module ${active ? active.id : 1} has settled.`;
   }
-  return `Answer the open question${open.length === 1 ? "" : "s"} (${open.join(", ")}) with beave qa-answer, then settle ${open.length === 1 ? "it" : "each"} with beave qa-settle.`;
+  return `Answer the open question${open.length === 1 ? "" : "s"} (${open.join(", ")}) with plangonaut qa-answer, then settle ${open.length === 1 ? "it" : "each"} with plangonaut qa-settle.`;
 }
 
 function engineWroteNextAction(value: unknown): boolean {
@@ -2487,7 +2878,7 @@ function advanceGeneratedNextAction(state: State, generated: string): string | n
     state.exact_next_action = generated;
     return null;
   }
-  return `The recorded exact next action was written by a person, so it is kept unchanged. Suggested instead: ${generated}\nTo replace it deliberately, use beave checkpoint --next-action or beave reconcile --next-action.`;
+  return `The recorded exact next action was written by a person, so it is kept unchanged. Suggested instead: ${generated}\nTo replace it deliberately, use plangonaut checkpoint --next-action or plangonaut reconcile --next-action.`;
 }
 
 function validTypedId(value: unknown, prefix: string): boolean {
@@ -2542,19 +2933,40 @@ function safeProjectRelative(value: unknown): boolean {
   return normalized !== ".." && !normalized.startsWith(`..${path.sep}`);
 }
 
+/**
+ * Every directory a recorded path may not point into.
+ *
+ * It was one name. The rename made it three, and a guard that knew the old one
+ * only would have let a caller record an artifact **inside the new ledger** —
+ * which is the whole thing this check exists to prevent, arriving through the
+ * door the rename opened. Found by `a preview refuses the paths the save
+ * refuses`, which is exactly the test that should have found it.
+ *
+ * The staging prefix is here too: a migration in flight owns that directory,
+ * and a document recorded into it would be destroyed by the migration's own
+ * cleanup.
+ */
+const RESERVED_DIRS = [STATE_DIR, LEGACY_STATE_DIR];
+const RESERVED_PREFIX = MIGRATION_STAGING_PREFIX;
+
+function isReservedTop(segment: string): boolean {
+  const lower = segment.toLowerCase();
+  return RESERVED_DIRS.includes(lower) || lower.startsWith(RESERVED_PREFIX);
+}
+
 function safeArtifactPath(value: unknown): boolean {
   if (!safeProjectRelative(value)) return false;
-  return path.normalize(canonicalRelative(value)).split(path.sep)[0].toLowerCase() !== ".beave";
+  return !isReservedTop(path.normalize(canonicalRelative(value)).split(path.sep)[0]);
 }
 
 /**
  * Why an artifact path was refused, in the words of the reason it was refused for.
  *
  * `safeArtifactPath` answers no to two unrelated questions — the path leaves the
- * project, or the path is inside the reserved directory — and the callers all
+ * project, or the path is inside a reserved directory — and the callers all
  * reported the second. Somebody who passed an absolute path, or one climbing out
- * with `..`, was told about `.beave`, which is not what happened and does not
- * suggest the fix.
+ * with `..`, was told about the ledger directory, which is not what happened and
+ * does not suggest the fix.
  */
 function artifactPathRefusal(kind: string, value: unknown): string | null {
   if (safeArtifactPath(value)) return null;
@@ -2563,7 +2975,7 @@ function artifactPathRefusal(kind: string, value: unknown): string | null {
       `\`${String(value)}\` is not: an absolute path, or one that climbs out with "..", ` +
       `would put the record outside the folder that travels with it.`;
   }
-  return `${kind} must stay outside the reserved .beave directory, which holds the ledger itself.`;
+  return `${kind} must stay outside the reserved ${STATE_DIR} and ${LEGACY_STATE_DIR} directories, which hold the ledger itself.`;
 }
 
 function existingFileInside(root: string, relative: string): string | null {
@@ -2639,20 +3051,20 @@ function forecastRangeText(range: ForecastRange): string {
 function parseForecastRange(flags: Flags, key: string): ForecastRange {
   const raw = required(flags, key).trim();
   if (raw.includes("%")) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `--${key} does not take a percentage. A percentage whose denominator can still change is presented as a fact and is not one, which is what FR-024 exists to prevent. Give an observable range like 3-8, or a single number when the quantity is known. Nothing was written.`
     );
   }
   const match = /^(\d{1,6})(?:\s*-\s*(\d{1,6}))?$/.exec(raw);
   if (!match) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `--${key} must be a range like 3-8, or a single number when the quantity is known; received ${raw}. Nothing was written.`
     );
   }
   const min = Number(match[1]);
   const max = match[2] === undefined ? min : Number(match[2]);
   if (max < min) {
-    throw new BeaveError(`--${key} has an inverted range: ${raw}. The lower bound must not exceed the upper bound. Nothing was written.`);
+    throw new PlangonautError(`--${key} has an inverted range: ${raw}. The lower bound must not exceed the upper bound. Nothing was written.`);
   }
   return { min, max };
 }
@@ -2660,7 +3072,9 @@ function parseForecastRange(flags: Flags, key: string): ForecastRange {
 /** What the engine counts for itself. See `ForecastDerived`. */
 function forecastDerived(state: State, events: any[]): ForecastDerived {
   return {
-    open_blockers: (state.blockers ?? []).length,
+    // Open ones. Counting every entry would have made resolving a blocker
+    // invisible to the forecast and left a cleared project looking stuck.
+    open_blockers: openBlockers(state).length,
     open_overrides: (state.human_overrides ?? []).filter((item) => item.status === "OPEN").length,
     tasks_by_status: Object.fromEntries(
       TASK_STATUSES.map((status) => [status, (state.tasks ?? []).filter((item) => item.status === status).length])
@@ -2854,12 +3268,12 @@ function forecastDisagreement(entry: ProgressForecast): string | null {
     `  Recorded by the caller: ${entry.cycle_state}`,
     `  Derived by the engine from recorded data: ${implied}`,
     ...(entry.signals ?? []).map((signal) => `  - ${signal.code}: ${signal.observed}`),
-    `The recorded cycle state was NOT changed. Beave does not overwrite a person's judgement and does not accept it in silence either; the signals are stored beside it in progress_forecast.signals.`,
+    `The recorded cycle state was NOT changed. Plangonaut does not overwrite a person's judgement and does not accept it in silence either; the signals are stored beside it in progress_forecast.signals.`,
   ].join("\n");
 }
 
 const FORECAST_RECORD_COMMAND =
-  `beave forecast --project-root . --owner NAME --phase TEXT --known-work TEXT --conditional-work TEXT ` +
+  `plangonaut forecast --project-root . --owner NAME --phase TEXT --known-work TEXT --conditional-work TEXT ` +
   `--questions MIN-MAX --operations MIN-MAX --cycles MIN-MAX --confidence ALTA|MEDIA|BASSA ` +
   `--confidence-reason TEXT --cycle-state REGOLARE|IN_ESPANSIONE|RISCHIO_LOOP|BLOCCATO --operation-id OP-ID`;
 
@@ -2885,7 +3299,7 @@ function forecastMarkdown(state: State, historyEntries = 0): string[] {
     `- Cycle state, as recorded by the caller: ${entry.cycle_state}`,
     `- Recorded by ${entry.recorded_by} at ${entry.recorded_at}, state revision ${entry.state_revision}`,
     `- Why it changed: ${entry.change_reason ?? "first forecast recorded for this project"}`,
-    `- Counted by the engine from the ledgers: open blockers ${entry.derived.open_blockers}${entry.derived.open_blockers === 0 ? " (nothing writes that ledger, so this is not a verified zero)" : ""}, open overrides ${entry.derived.open_overrides}, gates remaining ${entry.derived.gates_remaining}, unresolved modules ${entry.derived.unresolved_modules.length}, open findings ${entry.derived.open_findings ?? 0}, tasks ${TASK_STATUSES.map((status) => `${status} ${entry.derived.tasks_by_status?.[status] ?? 0}`).join(", ")}`
+    `- Counted by the engine from the ledgers: open blockers ${entry.derived.open_blockers}${blockerZeroCaveat(state, entry.derived.open_blockers)}, open overrides ${entry.derived.open_overrides}, gates remaining ${entry.derived.gates_remaining}, unresolved modules ${entry.derived.unresolved_modules.length}, open findings ${entry.derived.open_findings ?? 0}, tasks ${TASK_STATUSES.map((status) => `${status} ${entry.derived.tasks_by_status?.[status] ?? 0}`).join(", ")}`
   );
   if ((entry.signals ?? []).length) {
     lines.push("- Derived loop signals:");
@@ -2949,7 +3363,7 @@ function stateErrors(root: string, state: State, pendingEvent?: any): string[] {
   // matching message in `docop.rs`: both implementations say the same thing.
   if (state.project?.root !== root)
     errors.push(
-      `project root does not match requested root: the ledger records ${state.project?.root ?? "<nothing>"} and this is ${root}. A Beave project is not portable by copying — the recorded root is checked before every command. Re-root it with: beave project-export --project-root <original> --output-dir <package>, then beave project-import --package-dir <package> --project-root <destination>. This is the tool being unusable here, not the project state being broken: nothing in the folder is damaged.`
+      `project root does not match requested root: the ledger records ${state.project?.root ?? "<nothing>"} and this is ${root}. A Plangonaut project is not portable by copying — the recorded root is checked before every command. Re-root it with: plangonaut project-export --project-root <original> --output-dir <package>, then plangonaut project-import --package-dir <package> --project-root <destination>. This is the tool being unusable here, not the project state being broken: nothing in the folder is damaged.`
     );
   if (!PROJECT_MODES.has(state.project?.mode)) errors.push(`unsupported project mode=${state.project?.mode}`);
   if (!INTERACTION_MODES.has(state.interaction_mode)) errors.push(`unsupported interaction mode=${state.interaction_mode}`);
@@ -3020,7 +3434,7 @@ function stateErrors(root: string, state: State, pendingEvent?: any): string[] {
       // exists — re-record the evidence at its current revision — so the
       // refusal now states it. Both implementations must produce this string
       // byte for byte; see `docop.rs`.
-      else if (sha256(fs.readFileSync(evidenceFile)) !== item.sha256) errors.push(`evidence ${item.id} no longer matches ${item.path}: re-record it with \`beave evidence --id ${item.id} --file ${item.path} --owner <owner> --expected-revision ${Number.isInteger((item as any).revision) ? (item as any).revision : "?"}\`. Until then every mutation is refused, because this check runs inside the transaction.`);
+      else if (sha256(fs.readFileSync(evidenceFile)) !== item.sha256) errors.push(`evidence ${item.id} no longer matches ${item.path}: re-record it with \`plangonaut evidence --id ${item.id} --file ${item.path} --owner <owner> --expected-revision ${Number.isInteger((item as any).revision) ? (item as any).revision : "?"}\`. Until then every mutation is refused, because this check runs inside the transaction.`);
     }
   }
   for (const item of state.agents ?? []) {
@@ -3030,6 +3444,51 @@ function stateErrors(root: string, state: State, pendingEvent?: any): string[] {
   for (const item of state.checkpoints ?? []) {
     if (!validTypedId(item.id, "CHK") || !nonEmpty(item.name) || !nonEmpty(item.created_at)) errors.push(`invalid checkpoint ${item?.id ?? "<missing>"}`);
     validateRevision(item, "checkpoint");
+  }
+  /*
+   * Blockers, in both shapes, and neither of them is an error.
+   *
+   * A plain string is a blocker somebody wrote into the state file before this
+   * ledger existed. It is valid and it stays valid: refusing it would make every
+   * project that has one unopenable, and rewriting it into a record would mean
+   * inventing an owner and a date it never had. A *record* is held to the same
+   * standard as every other ledger entry.
+   */
+  const seenBlockerIds = new Set<string>();
+  for (const item of blockerEntries(state)) {
+    if (typeof item === "string") {
+      if (!item.trim()) errors.push("blocker recorded as an empty string");
+      continue;
+    }
+    if (
+      !validTypedId((item as any)?.id, "BLK") ||
+      !nonEmpty((item as any)?.title) ||
+      !nonEmpty((item as any)?.reason) ||
+      !nonEmpty((item as any)?.owner) ||
+      !nonEmpty((item as any)?.recorded_at) ||
+      !BLOCKER_STATUSES.has((item as any)?.status)
+    ) {
+      errors.push(`invalid blocker ${(item as any)?.id ?? "<missing>"}`);
+      continue;
+    }
+    if (seenBlockerIds.has(item.id)) errors.push(`blocker ${item.id} is recorded twice`);
+    seenBlockerIds.add(item.id);
+    // A resolved blocker that does not say how, when or by whom is a record of
+    // nothing: the point of keeping it is the account of how it ended.
+    if (item.status === "RESOLVED" && !(nonEmpty(item.resolution) && nonEmpty(item.resolved_by) && nonEmpty(item.resolved_at))) {
+      errors.push(`blocker ${item.id} is RESOLVED without a resolution, an owner and an instant`);
+    }
+    validateRevision(item, "blocker");
+  }
+  const verification = state.blockers_none_verified;
+  if (verification !== undefined && verification !== null) {
+    if (!nonEmpty(verification.by) || !nonEmpty(verification.at) || !Number.isInteger(verification.state_revision)) {
+      errors.push("blockers_none_verified is present but does not record who verified, when, and against which revision");
+    } else if (openBlockers(state).length) {
+      // The two cannot both be true, and a state file asserting both is exactly
+      // the case `UNTRUSTED` exists for.
+      errors.push(`blockers_none_verified says no blocker is open, and ${openBlockers(state).length} are`);
+    }
   }
   for (const item of state.artifacts ?? []) {
     if (!validTypedId(item.id, "ART") || !safeArtifactPath(item.base_path) || !safeArtifactPath(item.working_path) || !new Set(["DRAFT", "PUBLISHED", "DEPRECATED"]).has(item.status) || !Number.isInteger(item.revision) || item.revision < 1 || !/^[a-f0-9]{64}$/.test(item.content_hash ?? "")) errors.push(`invalid artifact ${item?.id ?? "<missing>"}`);
@@ -3113,7 +3572,7 @@ function stateErrors(root: string, state: State, pendingEvent?: any): string[] {
 function contextMarkdown(state: State, forecastHistoryEntries = 0): string {
   const active = activeModule(state);
   const lines = [
-    "# Beave Context Pack", "",
+    "# Plangonaut Context Pack", "",
     `- Project: ${state.project.name}`,
     `- Mode: ${state.project.mode}`,
     `- Lifecycle: ${state.lifecycle_state}`,
@@ -3133,12 +3592,10 @@ function contextMarkdown(state: State, forecastHistoryEntries = 0): string {
     "## Coverage evidence", "",
     ...state.modules.filter((item) => item.status !== "NOT STARTED").flatMap((item) => [`- M${item.id}: ${item.status} — ${item.evidence || "not recorded"}`, ...(item.summary ? [`  Summary: ${item.summary}`] : [])]), "",
     "## Blockers", "",
-    // An empty list is not evidence that there are none: no command writes this
-    // ledger, so `status` and this pack have always printed "none" on projects
-    // carrying real, documented blockers.
-    ...(state.blockers?.length
-      ? state.blockers.map((item) => `- ${item}`)
-      : ["- None recorded in state. No command writes this ledger today, so an empty list is not evidence that the project has no blockers: look for them in the governed documents."]), "",
+    // Open first, then the resolved ones, which stay. An empty list is still not
+    // evidence of none: what makes a zero mean something is somebody recording
+    // that they looked, and the section says which of the two this is.
+    ...blockerReportLines(state), "",
     "## Risks", "",
     ...(state.risks?.length ? state.risks.map((item) => `- ${item.title}`) : ["- None recorded."]), "",
     "## Authoritative evidence", "",
@@ -3170,23 +3627,23 @@ function init(flags: Flags): void {
   const destination = stateRoot(root);
   const key = idempotencyKey(flags);
   if (fs.existsSync(path.join(destination, "events.jsonl")) && checkIdempotency(root, key)) return console.log(`Idempotent retry: init already applied.`);
-  if (fs.existsSync(path.join(destination, "state.json")) || fs.existsSync(path.join(destination, "events.jsonl"))) throw new BeaveError(`State already exists at ${destination}; use resume`);
+  if (fs.existsSync(path.join(destination, "state.json")) || fs.existsSync(path.join(destination, "events.jsonl"))) throw new PlangonautError(`State already exists at ${destination}; use resume`);
   const projectMode = required(flags, "project-mode");
   const interactionMode = required(flags, "interaction-mode");
-  if (!PROJECT_MODES.has(projectMode)) throw new BeaveError(`Unsupported project mode: ${projectMode}`);
-  if (!INTERACTION_MODES.has(interactionMode)) throw new BeaveError(`Unsupported interaction mode: ${interactionMode}`);
+  if (!PROJECT_MODES.has(projectMode)) throw new PlangonautError(`Unsupported project mode: ${projectMode}`);
+  if (!INTERACTION_MODES.has(interactionMode)) throw new PlangonautError(`Unsupported interaction mode: ${interactionMode}`);
   const owners = readJson(path.resolve(required(flags, "owners-file")));
   // Schema v3 closes `decision_owners` to exactly five roles, so a sixth cannot be
   // stored. It used to be dropped in silence: pilot B supplied `compliance` and
   // `quality` for a CE-marked product and `init` reported success without them.
   const unknownOwners = Object.keys(owners ?? {}).filter((key) => !OWNER_KEYS.includes(key));
   if (unknownOwners.length) {
-    throw new BeaveError(
-      `Owners file declares roles Beave cannot store: ${unknownOwners.join(", ")}. ` +
+    throw new PlangonautError(
+      `Owners file declares roles Plangonaut cannot store: ${unknownOwners.join(", ")}. ` +
         `Recognised roles are ${OWNER_KEYS.join(", ")}. Record the other authorities in a governed document and reference them there; nothing was written.`
     );
   }
-  for (const key of OWNER_KEYS) if (!String(owners[key] ?? "").trim()) throw new BeaveError(`Owners file requires ${OWNER_KEYS.join(", ")}`);
+  for (const key of OWNER_KEYS) if (!String(owners[key] ?? "").trim()) throw new PlangonautError(`Owners file requires ${OWNER_KEYS.join(", ")}`);
   const timestamp = now();
   const eventId = crypto.randomUUID();
   const state: State = {
@@ -3224,7 +3681,7 @@ function init(flags: Flags): void {
     needs_reconciliation: false, 
     revision: 1, 
     last_event_id: eventId,
-    exact_next_action: "Run `beave next --project-root .` and discuss module 1.",
+    exact_next_action: "Run `plangonaut next --project-root .` and discuss module 1.",
     created_at: timestamp, 
     updated_at: timestamp
   };
@@ -3245,11 +3702,11 @@ function init(flags: Flags): void {
    * This event's patch sets the whole state, so replaying from here needs no
    * earlier history and no separate snapshot file: initialization *is* the
    * baseline. An imported or migrated project gets one the other way round, from
-   * `beave baseline`, and says so.
+   * `plangonaut baseline`, and says so.
    */
   const event = { event_id: eventId, type: "PROJECT_INITIALIZED", state_revision: 1, at: timestamp, project: state.project.name, project_mode: projectMode, interaction_mode: interactionMode, idempotency_key: key, replay_origin: true, operation_id: pendingOperation!.id, operation_payload_hash: pendingOperation!.payloadHash, operation_payload_version: pendingOperation!.payloadVersion };
   const errors = stateErrors(root, state, event);
-  if (errors.length) throw new BeaveError(`Initialization failed validation:\n- ${errors.join("\n- ")}`);
+  if (errors.length) throw new PlangonautError(`Initialization failed validation:\n- ${errors.join("\n- ")}`);
   fs.mkdirSync(destination, { recursive: true });
   const transaction = beginFileTransaction(root, event, [path.join(root, QA_VIEW_RELATIVE)]);
   try {
@@ -3272,7 +3729,7 @@ function init(flags: Flags): void {
     if (fs.existsSync(transaction)) rollbackFileTransaction(root, transaction);
     throw error;
   }
-  console.log(`Initialized Beave state at ${destination}`);
+  console.log(`Initialized Plangonaut state at ${destination}`);
 }
 
 /**
@@ -3282,7 +3739,7 @@ function init(flags: Flags): void {
  * re-hashes artifacts, but `modules[].evidence_sha256` was compared in exactly one
  * place — the gate-2 prerequisite check — and `human_overrides[].source_sha256` in
  * none at all. Gate 2 is unreachable until gate 1 passes, so a project could report
- * "Beave state is valid." for the whole interview while a confirmed module pointed
+ * "Plangonaut state is valid." for the whole interview while a confirmed module pointed
  * at content that no longer existed (ALN-005, reproduced 2026-09-10).
  *
  * Deliberately NOT part of `stateErrors()`. That runs inside `commitState()` on
@@ -3314,7 +3771,7 @@ function recordedDigestErrors(root: string, state: State): string[] {
       `module ${item.id}`,
       item.evidence,
       (item as any).evidence_sha256,
-      `beave record --project-root . --module ${item.id} --status ${item.status?.replaceAll(" ", "_") ?? "<status>"} --owner <owner> --answer-file ${item.evidence} --operation-id <id>`
+      `plangonaut record --project-root . --module ${item.id} --status ${item.status?.replaceAll(" ", "_") ?? "<status>"} --owner <owner> --answer-file ${item.evidence} --operation-id <id>`
     );
   }
   for (const item of state.human_overrides ?? []) {
@@ -3322,7 +3779,7 @@ function recordedDigestErrors(root: string, state: State): string[] {
       `override ${item.id}`,
       (item as any).source,
       (item as any).source_sha256,
-      `beave re-record --project-root . --kind override --id ${item.id} --source-file ${(item as any).source} --owner <owner> --reason "<why the source changed>" --operation-id <id>`
+      `plangonaut re-record --project-root . --kind override --id ${item.id} --source-file ${(item as any).source} --owner <owner> --reason "<why the source changed>" --operation-id <id>`
     );
   }
   // B5. A gate is the record that says a phase may end, and its evidence is the
@@ -3347,14 +3804,14 @@ function recordedDigestErrors(root: string, state: State): string[] {
   //    revision of an evidence document into a validation failure.
   //
   // The route out of "claims nothing" is a governed operation, not a silent
-  // backfill: `beave re-record --kind gate`. `validate` names the gates that carry
+  // backfill: `plangonaut re-record --kind gate`. `validate` names the gates that carry
   // no digest without failing on them, so the silence is audible.
   for (const item of state.gates ?? []) {
     check(
       `gate ${item.name || item.id}`,
       (item as any).evidence,
       (item as any).evidence_sha256,
-      `beave re-record --project-root . --kind gate --id ${item.name || item.id} --source-file ${(item as any).evidence} --owner <owner> --reason "<why the evidence changed>" --operation-id <id>`
+      `plangonaut re-record --project-root . --kind gate --id ${item.name || item.id} --source-file ${(item as any).evidence} --owner <owner> --reason "<why the evidence changed>" --operation-id <id>`
     );
   }
 
@@ -3398,7 +3855,7 @@ function recordedDigestErrors(root: string, state: State): string[] {
  * Gate records `validate` has nothing to re-verify, and the sentence that says so.
  *
  * A skip that says nothing is what let B5 live: a project could report
- * "Beave state is valid." while every gate in it rested on a file the engine had
+ * "Plangonaut state is valid." while every gate in it rested on a file the engine had
  * never looked at again. The skip is still the right behaviour for a record that
  * predates the rule — see `recordedDigestErrors` — so it is reported instead of
  * enforced. `null` when there is nothing to say.
@@ -3414,7 +3871,7 @@ function unverifiableGateNote(state: State): string | null {
   return (
     `${unverifiable.length} of ${gates.length} gate record${gates.length === 1 ? "" : "s"} carr${unverifiable.length === 1 ? "ies" : "y"} no evidence digest, so validate re-verified nothing for them: ${names}. ` +
     `They were recorded before the gate record kept its evidence; failing them would report a drift nobody can prove. ` +
-    `Attach the file the gate was passed on with: beave re-record --project-root . --kind gate --id ${unverifiable[0].name || unverifiable[0].id} --source-file <file> --owner <owner> --reason "<why>" --operation-id <id>`
+    `Attach the file the gate was passed on with: plangonaut re-record --project-root . --kind gate --id ${unverifiable[0].name || unverifiable[0].id} --source-file <file> --owner <owner> --reason "<why>" --operation-id <id>`
   );
 }
 
@@ -3456,15 +3913,15 @@ function reRecord(flags: Flags): void {
   const { location, state } = loadState(root);
   const kind = required(flags, "kind").trim().toLowerCase();
   if (kind !== "override" && kind !== "gate") {
-    throw new BeaveError(
-      `Unsupported --kind: ${required(flags, "kind")}. Beave can re-record the source of an override or the evidence of a gate. Nothing was written.`
+    throw new PlangonautError(
+      `Unsupported --kind: ${required(flags, "kind")}. Plangonaut can re-record the source of an override or the evidence of a gate. Nothing was written.`
     );
   }
   const owner = required(flags, "owner").trim();
   assertKnownOwner(state, owner);
   const reason = required(flags, "reason").trim();
   if (!reason) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `--reason cannot be empty. Re-recording replaces the file a governed record stands on, and the reason is the only account of why it was allowed. Nothing was written.`
     );
   }
@@ -3479,7 +3936,7 @@ function reRecord(flags: Flags): void {
 
   if (kind === "override") {
     target = (state.human_overrides ?? []).find((item) => item.id === id);
-    if (!target) throw new BeaveError(`Override not found: ${id}. Nothing was written.`);
+    if (!target) throw new PlangonautError(`Override not found: ${id}. Nothing was written.`);
     label = `override ${target.id}`;
     previousPath = nonEmpty(target.source) ? String(target.source) : null;
     previousDigest = /^[a-f0-9]{64}$/.test(String(target.source_sha256 ?? "")) ? String(target.source_sha256) : null;
@@ -3489,18 +3946,18 @@ function reRecord(flags: Flags): void {
     const sourcePath = path.resolve(required(flags, "source-file"));
     const candidate = path.relative(root, sourcePath);
     const confined = existingFileInside(root, candidate);
-    if (!confined) throw new BeaveError(`The new source must be an existing file inside the project root: ${sourcePath}`);
+    if (!confined) throw new PlangonautError(`The new source must be an existing file inside the project root: ${sourcePath}`);
     const bytes = fs.readFileSync(confined);
-    if (!bytes.length || !bytes.toString("utf8").trim()) throw new BeaveError(`The new source cannot be empty: ${candidate}`);
+    if (!bytes.length || !bytes.toString("utf8").trim()) throw new PlangonautError(`The new source cannot be empty: ${candidate}`);
     relative = candidate.replaceAll("\\", "/");
     digest = sha256(bytes);
   } else {
     target = (state.gates ?? []).find((item) => item.name === id || item.id === id);
-    if (!target) throw new BeaveError(`Gate not found: ${id}. Nothing was written.`);
+    if (!target) throw new PlangonautError(`Gate not found: ${id}. Nothing was written.`);
     label = `gate ${target.name || target.id}`;
     previousPath = nonEmpty((target as any).evidence) ? String((target as any).evidence) : null;
     previousDigest = /^[a-f0-9]{64}$/.test(String((target as any).evidence_sha256 ?? "")) ? String((target as any).evidence_sha256) : null;
-    // Gate evidence obeys the rule `beave gate` enforces, unchanged: an existing,
+    // Gate evidence obeys the rule `plangonaut gate` enforces, unchanged: an existing,
     // non-empty file inside the project and outside the reserved `.beave`.
     const evidence = verifiedEvidence(root, path.resolve(required(flags, "source-file")));
     relative = evidence.relative;
@@ -3508,7 +3965,7 @@ function reRecord(flags: Flags): void {
   }
 
   if (previousPath !== null && previousDigest !== null && previousPath.replaceAll("\\", "/") === relative && previousDigest === digest) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `${label} already records ${relative} at that digest. There is nothing to re-record; no changes written.`
     );
   }
@@ -3564,7 +4021,7 @@ function reRecord(flags: Flags): void {
 
 // Everything `forecast` writes with. `--project-root` and `--operation-id` are not
 // in the list: the first says where, the second says who, and neither is a
-// statement about the project. So `beave forecast --project-root .` reads.
+// statement about the project. So `plangonaut forecast --project-root .` reads.
 const FORECAST_WRITE_OPTIONS = [
   "owner", "phase", "known-work", "conditional-work", "questions", "operations", "cycles",
   "confidence", "confidence-reason", "cycle-state", "change-reason", "expected-revision",
@@ -3607,12 +4064,12 @@ function forecast(flags: Flags): void {
   if (flags["expected-revision"] !== undefined) {
     const expected = Number(required(flags, "expected-revision"));
     if (!previous) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `--expected-revision was given, but this project has never recorded a progress forecast, so there is no revision to match. Nothing was written.`
       );
     }
     if (!Number.isInteger(expected) || expected !== previous.state_revision) {
-      throw new BeaveError(`Stale progress forecast: expected revision ${previous.state_revision}. No changes written.`);
+      throw new PlangonautError(`Stale progress forecast: expected revision ${previous.state_revision}. No changes written.`);
     }
   }
 
@@ -3620,30 +4077,30 @@ function forecast(flags: Flags): void {
   // moved and cannot say why is the failure D5 was recorded against.
   const changeReason = typeof flags["change-reason"] === "string" ? flags["change-reason"].trim() : "";
   if (previous && !changeReason) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `--change-reason is required: this project already recorded a progress forecast on ${previous.recorded_at} at revision ${previous.state_revision}, and a forecast that changes without its cause cannot explain itself later. Supply --change-reason "<what changed and why>". Nothing was written.`
     );
   }
   if (!previous && changeReason) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `--change-reason was given, but this is the first forecast for this project, so there is nothing it changed from. Put the reasoning in --confidence-reason. Nothing was written.`
     );
   }
 
   const confidence = required(flags, "confidence").trim().toUpperCase();
   if (!CONFIDENCE_LEVELS.includes(confidence)) {
-    throw new BeaveError(`Unsupported --confidence: ${confidence}. Use one of ${CONFIDENCE_LEVELS.join(", ")}. Nothing was written.`);
+    throw new PlangonautError(`Unsupported --confidence: ${confidence}. Use one of ${CONFIDENCE_LEVELS.join(", ")}. Nothing was written.`);
   }
   const cycleState = required(flags, "cycle-state").trim().toUpperCase().replaceAll(" ", "_");
   if (!CYCLE_STATES.includes(cycleState)) {
-    throw new BeaveError(`Unsupported --cycle-state: ${cycleState}. Use one of ${CYCLE_STATES.join(", ")}. Nothing was written.`);
+    throw new PlangonautError(`Unsupported --cycle-state: ${cycleState}. Use one of ${CYCLE_STATES.join(", ")}. Nothing was written.`);
   }
   const phase = required(flags, "phase").trim();
   const knownWork = required(flags, "known-work").trim();
   const conditionalWork = required(flags, "conditional-work").trim();
   const confidenceReason = required(flags, "confidence-reason").trim();
   for (const [option, value] of [["phase", phase], ["known-work", knownWork], ["conditional-work", conditionalWork], ["confidence-reason", confidenceReason]] as const) {
-    if (!value) throw new BeaveError(`--${option} cannot be empty. Nothing was written.`);
+    if (!value) throw new PlangonautError(`--${option} cannot be empty. Nothing was written.`);
   }
   const questions = parseForecastRange(flags, "questions");
   const operations = parseForecastRange(flags, "operations");
@@ -3732,7 +4189,7 @@ function forecast(flags: Flags): void {
       `  Confidence: ${confidence} — ${confidenceReason}`,
       `  Cycle state, as recorded by you: ${cycleState}`,
       `  Why it changed: ${entry.change_reason ?? "first forecast recorded for this project"}`,
-      `  Counted by the engine from the ledgers: open blockers ${derived.open_blockers}${derived.open_blockers === 0 ? " (nothing writes that ledger, so this is not a verified zero)" : ""}, open overrides ${derived.open_overrides}, gates remaining ${derived.gates_remaining}, unresolved modules ${derived.unresolved_modules.length}, open findings ${derived.open_findings}`,
+      `  Counted by the engine from the ledgers: open blockers ${derived.open_blockers}${blockerZeroCaveat(state, derived.open_blockers)}, open overrides ${derived.open_overrides}, gates remaining ${derived.gates_remaining}, unresolved modules ${derived.unresolved_modules.length}, open findings ${derived.open_findings}`,
       entry.signals.length
         ? `  Derived loop signals: ${entry.signals.map((signal) => signal.code).join(", ")}`
         : `  Derived loop signals: none in the recorded data.`,
@@ -3763,7 +4220,7 @@ function historyErrors(root: string, state: State): { errors: string[]; notes: s
   const outcome = replayFromEvents(root);
   if (outcome.replayable) {
     if (digestOf(outcome.state) !== digestOf(state)) {
-      return { errors: [`the state does not match its own history. ${describeDifferences(state, outcome.state, 8).join("; ").trim()}. Rebuild it with: beave replay --project-root . --repair --operation-id <id>`], notes: [] };
+      return { errors: [`the state does not match its own history. ${describeDifferences(state, outcome.state, 8).join("; ").trim()}. Rebuild it with: plangonaut replay --project-root . --repair --operation-id <id>`], notes: [] };
     }
     const notes = outcome.unprovenBefore > 0
       ? [outcome.unprovenBefore === 1
@@ -3785,7 +4242,7 @@ function validateRoot(root: string, includeDocuments = false): State {
   const errors = stateErrors(root, state);
   if (includeDocuments && !errors.length) errors.push(...documentIntegrityErrors(root, state));
   if (includeDocuments && !errors.length) errors.push(...interviewViewErrors(root, state));
-  if (errors.length) throw new BeaveError(`Validation failed:\n- ${errors.join("\n- ")}`);
+  if (errors.length) throw new PlangonautError(`Validation failed:\n- ${errors.join("\n- ")}`, "PROJECT_STATE_UNTRUSTED");
   return state;
 }
 
@@ -3814,23 +4271,280 @@ function validateRoot(root: string, includeDocuments = false): State {
  * unreachable today and is named so that "verified none" and "nobody looked"
  * cannot collapse into each other later. `ALN-015` holds the writable ledger.
  */
-function blockerAssurance(state: State): { blockers: string[] | null; blockers_recorded: boolean; blockers_assurance: string; blockers_note: string } {
-  const recorded = Array.isArray(state.blockers) ? state.blockers : [];
-  if (recorded.length) {
+function blockerAssurance(state: State): {
+  blockers: (string | Blocker)[] | null;
+  blockers_recorded: boolean;
+  open_blockers: number;
+  blockers_assurance: string;
+  blockers_verified_none: BlockerVerification | null;
+  blockers_note: string;
+} {
+  const entries = blockerEntries(state);
+  const open = openBlockers(state);
+  const verification = state.blockers_none_verified ?? null;
+
+  if (open.length) {
     return {
-      blockers: recorded,
+      blockers: entries,
       blockers_recorded: true,
+      open_blockers: open.length,
       blockers_assurance: "RECORDED",
-      blockers_note: "These are the blockers recorded in the ledger. Nothing guarantees they are all of them.",
+      blockers_verified_none: null,
+      blockers_note:
+        "These are the entries in the ledger. RECORDED means they are what was written down, not that they are every blocker the project has.",
     };
   }
+
+  if (verification) {
+    return {
+      blockers: entries.length ? entries : null,
+      blockers_recorded: entries.length > 0,
+      open_blockers: 0,
+      blockers_assurance: "NONE_VERIFIED",
+      blockers_verified_none: verification,
+      blockers_note: `${verification.by} verified at ${verification.at}, against revision ${verification.state_revision}, that no blocker was open. Recording or resolving one clears this, because a verification is a statement about one state of the ledger.`,
+    };
+  }
+
+  if (entries.length) {
+    return {
+      blockers: entries,
+      blockers_recorded: true,
+      open_blockers: 0,
+      blockers_assurance: "UNKNOWN",
+      blockers_verified_none: null,
+      blockers_note:
+        "Every recorded blocker is resolved, and nobody has verified since that none is open. Resolving the last one is not the same statement as looking and finding none: record that with `plangonaut blocker-verify-none`.",
+    };
+  }
+
   return {
     blockers: null,
     blockers_recorded: false,
+    open_blockers: 0,
     blockers_assurance: "UNKNOWN",
+    blockers_verified_none: null,
     blockers_note:
-      "No blocker is recorded, and no Beave command writes this ledger, so this is not evidence that the project has none. Look in the governed documents. `blockers` is null rather than [] because an empty list would read as a verified absence.",
+      "Nothing is recorded and nobody has verified that nothing is open. An empty ledger is not evidence of an unblocked project: record what you find with `plangonaut blocker-record`, or record the absence with `plangonaut blocker-verify-none`. `blockers` is null rather than [] because an empty list would read as a verified absence.",
   };
+}
+
+/**
+ * Where a blocker command starts: lock, idempotency, state, owner.
+ *
+ * Shared by the three so they cannot drift apart on the things that must be the
+ * same — and `assertNotBlocked` is deliberately **not** among them. A project
+ * awaiting reconciliation is exactly a project somebody needs to record a
+ * blocker against; refusing the record because the project is blocked would be
+ * the ledger refusing the only entry it exists for.
+ */
+function blockerCommandStart(flags: Flags): { root: string; key: string; location: string; state: State; owner: string; timestamp: string } | null {
+  const root = resolveProject(required(flags, "project-root"));
+  const key = idempotencyKey(flags);
+  if (checkIdempotency(root, key)) return null;
+  const { location, state } = loadState(root);
+  const owner = required(flags, "owner").trim();
+  assertKnownOwner(state, owner);
+  return { root, key, location, state, owner, timestamp: now() };
+}
+
+/** Commit one blocker mutation. Every one of them clears a stale verification. */
+function commitBlocker(
+  root: string,
+  location: string,
+  state: State,
+  key: string,
+  type: string,
+  timestamp: string,
+  owner: string,
+  extra: Record<string, unknown>,
+): void {
+  state.updated_at = timestamp;
+  const revision = state.revision + 1;
+  const eventId = crypto.randomUUID();
+  state.revision = revision;
+  state.last_event_id = eventId;
+  commitState(root, location, state, {
+    event_id: eventId,
+    type,
+    state_revision: revision,
+    at: timestamp,
+    idempotency_key: key,
+    owner,
+    ...extra,
+  });
+}
+
+/**
+ * Record a blocker, or update one that is already there.
+ *
+ * `--expected-revision` is required to touch an existing record, exactly as it
+ * is for every other ledger: two people editing the same blocker from two
+ * checkouts is the case it exists for.
+ */
+function blockerRecord(flags: Flags): void {
+  const started = blockerCommandStart(flags);
+  if (!started) return console.log("Idempotent retry: blocker already recorded.");
+  const { root, key, location, state, owner, timestamp } = started;
+
+  const id = required(flags, "id").toUpperCase();
+  if (!validTypedId(id, "BLK")) throw new PlangonautError(`Invalid blocker ID: ${id}. Expected BLK- followed by uppercase letters, numbers, _ or -.`);
+  const title = required(flags, "title").trim();
+  if (!title) throw new PlangonautError(`--title cannot be empty`);
+  const reason = required(flags, "reason").trim();
+  if (!reason) throw new PlangonautError(`--reason cannot be empty`);
+
+  const records = blockerRecords(state);
+  const existing = records.find((item) => item.id === id);
+  if (existing) {
+    const expected = Number(required(flags, "expected-revision"));
+    if (!Number.isInteger(expected) || expected !== existing.revision) {
+      throw new PlangonautError(`Stale blocker ${id}: expected revision ${existing.revision}. No changes written.`);
+    }
+    if (existing.status === "RESOLVED") {
+      throw new PlangonautError(
+        `Blocker ${id} is resolved. Reopening it by overwriting the record would erase how it was closed; record the new obstacle as its own blocker instead. Nothing was written.`,
+      );
+    }
+  }
+
+  let evidence: { path: string; sha256: string } | undefined;
+  if (typeof flags["evidence-file"] === "string") {
+    const verified = verifiedEvidence(root, path.resolve(String(flags["evidence-file"])));
+    evidence = { path: verified.relative.replaceAll("\\", "/"), sha256: verified.hash };
+  }
+
+  const record: Blocker = {
+    id,
+    title,
+    reason,
+    status: "OPEN",
+    owner,
+    recorded_at: existing?.recorded_at ?? timestamp,
+    ...(evidence ? { evidence } : {}),
+    revision: (existing?.revision ?? 0) + 1,
+    updated_at: timestamp,
+  };
+
+  if (existing) Object.assign(existing, record);
+  else (state.blockers as (string | Blocker)[]).push(record);
+
+  // An open blocker and a verification that none is open cannot both stand.
+  state.blockers_none_verified = null;
+
+  commitBlocker(root, location, state, key, existing ? "BLOCKER_UPDATED" : "BLOCKER_RECORDED", timestamp, owner, {
+    ledger_id: id,
+    record_revision: record.revision,
+    record_status: record.status,
+  });
+  console.log(`${existing ? "Updated" : "Recorded"} blocker ${id} at revision ${record.revision}`);
+}
+
+/**
+ * Close a blocker without losing it.
+ *
+ * The record stays and gains how it ended. A `RESOLVED` blocker is history, and
+ * history is the thing a ledger is for: `resume` and the context pack still show
+ * it, and `open_blockers` stops counting it.
+ */
+function blockerResolve(flags: Flags): void {
+  const started = blockerCommandStart(flags);
+  if (!started) return console.log("Idempotent retry: blocker already resolved.");
+  const { root, key, location, state, owner, timestamp } = started;
+
+  const id = required(flags, "id").toUpperCase();
+  const existing = blockerRecords(state).find((item) => item.id === id);
+  if (!existing) {
+    const known = blockerRecords(state).map((item) => item.id);
+    throw new PlangonautError(
+      `No blocker ${id} is recorded${known.length ? `. Recorded: ${known.join(", ")}` : " in this project"}. ` +
+        `A blocker written as free text before the ledger existed has no id and cannot be resolved by one: record it with \`plangonaut blocker-record\` first, so that closing it leaves a trace. Nothing was written.`,
+    );
+  }
+  if (existing.status === "RESOLVED") {
+    throw new PlangonautError(`Blocker ${id} was already resolved by ${existing.resolved_by} at ${existing.resolved_at}. Nothing was written.`);
+  }
+  const expected = Number(required(flags, "expected-revision"));
+  if (!Number.isInteger(expected) || expected !== existing.revision) {
+    throw new PlangonautError(`Stale blocker ${id}: expected revision ${existing.revision}. No changes written.`);
+  }
+  const resolution = required(flags, "resolution").trim();
+  if (!resolution) throw new PlangonautError(`--resolution cannot be empty`);
+
+  if (typeof flags["evidence-file"] === "string") {
+    const verified = verifiedEvidence(root, path.resolve(String(flags["evidence-file"])));
+    existing.evidence = { path: verified.relative.replaceAll("\\", "/"), sha256: verified.hash };
+  }
+
+  existing.status = "RESOLVED";
+  existing.resolution = resolution;
+  existing.resolved_by = owner;
+  existing.resolved_at = timestamp;
+  existing.revision += 1;
+  existing.updated_at = timestamp;
+
+  /*
+   * Resolving the last open blocker does not verify that none is open.
+   *
+   * It is a statement about one blocker; "there are none" is a statement about
+   * the project, and somebody has to make it. Clearing the marker here keeps the
+   * two apart — which is why the required path is RECORDED → UNKNOWN, and
+   * NONE_VERIFIED only after somebody says so.
+   */
+  state.blockers_none_verified = null;
+
+  commitBlocker(root, location, state, key, "BLOCKER_RESOLVED", timestamp, owner, {
+    ledger_id: id,
+    record_revision: existing.revision,
+    record_status: existing.status,
+  });
+  console.log(`Resolved blocker ${id} at revision ${existing.revision}. The record is kept.`);
+}
+
+/**
+ * Put a name to "I looked, and nothing is open".
+ *
+ * Refused while anything is open, because it would be false. This is the only
+ * route to `NONE_VERIFIED`, and it is a mutation with an owner and an event for
+ * the same reason every other assertion in this engine is: an unattributed
+ * claim of absence is exactly what `[]` used to be.
+ */
+function blockerVerifyNone(flags: Flags): void {
+  const started = blockerCommandStart(flags);
+  if (!started) return console.log("Idempotent retry: the absence of open blockers is already recorded.");
+  const { root, key, location, state, owner, timestamp } = started;
+
+  const open = openBlockers(state);
+  if (open.length) {
+    throw new PlangonautError(
+      `${open.length} blocker${open.length === 1 ? " is" : "s are"} open, so "none is open" cannot be recorded:\n- ${open.map(blockerLine).join("\n- ")}\n` +
+        `Resolve them with \`plangonaut blocker-resolve\` first. Nothing was written.`,
+    );
+  }
+
+  const note = typeof flags.note === "string" ? String(flags.note).trim() : "";
+  const eventId = crypto.randomUUID();
+  state.blockers_none_verified = {
+    at: timestamp,
+    by: owner,
+    state_revision: state.revision + 1,
+    event_id: eventId,
+    ...(note ? { note } : {}),
+  };
+  state.updated_at = timestamp;
+  const revision = state.revision + 1;
+  state.revision = revision;
+  state.last_event_id = eventId;
+  commitState(root, location, state, {
+    event_id: eventId,
+    type: "BLOCKERS_VERIFIED_NONE",
+    state_revision: revision,
+    at: timestamp,
+    idempotency_key: key,
+    owner,
+    ...(note ? { note } : {}),
+  });
+  console.log(`Recorded: ${owner} verified at revision ${revision} that no blocker is open.`);
 }
 
 function status(flags: Flags): void {
@@ -3848,13 +4562,23 @@ function status(flags: Flags): void {
    */
   const history = historyErrors(root, state);
   if (history.errors.length) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `This project's state does not agree with its history, so its status cannot be reported as fact:\n- ${history.errors.join("\n- ")}\n` +
-        `Rebuild it from the history with \`beave replay --project-root . --repair --operation-id <id>\`, or restore the state. Nothing was changed.`,
+        `Rebuild it from the history with \`plangonaut replay --project-root . --repair --operation-id <id>\`, or restore the state. Nothing was changed.`,
+      "PROJECT_STATE_UNTRUSTED",
     );
   }
   const active = activeModule(state);
-  console.log(JSON.stringify({ project: state.project.name, project_mode: state.project.mode, interaction_mode: state.interaction_mode, lifecycle_state: state.lifecycle_state, current_gate: state.current_gate, coverage: `${state.modules.filter((item) => new Set(["CONFIRMED", "DEFERRED", "NOT APPLICABLE"]).has(item.status)).length}/${state.modules.length}`, active_module: active && { id: active.id, title: active.title, status: active.status }, needs_reconciliation: state.needs_reconciliation, open_overrides: state.human_overrides.filter((item) => item.status === "OPEN").length, ...blockerAssurance(state), progress_forecast: statusForecast(state), exact_next_action: state.exact_next_action, updated_at: state.updated_at }, null, 2));
+  /*
+   * Which format this project is stored in, declared rather than implied.
+   *
+   * A caller that reads a legacy project and is not told so will eventually
+   * write a path, a message or a document that assumes the other directory. It
+   * is two fields: the format, and the directory name, because a human reading
+   * the machine output should not have to know the mapping.
+   */
+  const where = locateState(root);
+  console.log(JSON.stringify({ project: state.project.name, state_format: where.format, state_directory: where.name, project_mode: state.project.mode, interaction_mode: state.interaction_mode, lifecycle_state: state.lifecycle_state, current_gate: state.current_gate, coverage: `${state.modules.filter((item) => new Set(["CONFIRMED", "DEFERRED", "NOT APPLICABLE"]).has(item.status)).length}/${state.modules.length}`, active_module: active && { id: active.id, title: active.title, status: active.status }, needs_reconciliation: state.needs_reconciliation, open_overrides: state.human_overrides.filter((item) => item.status === "OPEN").length, ...blockerAssurance(state), progress_forecast: statusForecast(state), exact_next_action: state.exact_next_action, updated_at: state.updated_at }, null, 2));
 }
 
 /**
@@ -3891,7 +4615,7 @@ function nextQuestions(state: State, requestedCount?: string | boolean): string 
   const active = activeModule(state);
   if (!active) return "Questionnaire coverage complete. Next: approve the research/synthesis gate.\n";
   const count = requestedCount ? Number(requestedCount) : (({ Guided: 1, Standard: 2, Expert: 3 } as any)[state.interaction_mode] ?? 2);
-  if (![1, 2, 3].includes(count)) throw new BeaveError("--count must be 1, 2, or 3");
+  if (![1, 2, 3].includes(count)) throw new PlangonautError("--count must be 1, 2, or 3");
   const catalog = questionnaire().find((item: any) => item.id === active.id);
   /*
    * A catalog question the ledger already answers is marked, not printed clean.
@@ -3995,9 +4719,9 @@ function findInterviewEntry(state: any, id: string): InterviewEntry | undefined 
 function normalizeQuestionId(value: string): string {
   const trimmed = String(value).trim().toUpperCase();
   const bare = trimmed.startsWith("QNA-") ? trimmed.slice(4) : trimmed;
-  if (!/^[0-9]+$/.test(bare)) throw new BeaveError(`Invalid question id: ${value}. Use QNA-0007, or 7.`);
+  if (!/^[0-9]+$/.test(bare)) throw new PlangonautError(`Invalid question id: ${value}. Use QNA-0007, or 7.`);
   const padded = `QNA-${bare.padStart(4, "0")}`;
-  if (!QA_ID_PATTERN.test(padded)) throw new BeaveError(`Invalid question id: ${value}`);
+  if (!QA_ID_PATTERN.test(padded)) throw new PlangonautError(`Invalid question id: ${value}`);
   return padded;
 }
 
@@ -4011,17 +4735,17 @@ function normalizeQuestionId(value: string): string {
 function textOrFile(flags: Flags, name: string, label: string, optional = false): string | null {
   const inline = flags[name];
   const fromFile = flags[`${name}-file`];
-  if (nonEmpty(inline) && nonEmpty(fromFile)) throw new BeaveError(`Pass either --${name} or --${name}-file for ${label}, not both`);
+  if (nonEmpty(inline) && nonEmpty(fromFile)) throw new PlangonautError(`Pass either --${name} or --${name}-file for ${label}, not both`);
   if (nonEmpty(inline)) return String(inline).trim();
   if (nonEmpty(fromFile)) {
     const resolved = path.resolve(String(fromFile));
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) throw new BeaveError(`${label} file does not exist: ${resolved}`);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) throw new PlangonautError(`${label} file does not exist: ${resolved}`);
     const text = fs.readFileSync(resolved, "utf8").trim();
-    if (!text) throw new BeaveError(`${label} file is empty: ${resolved}`);
+    if (!text) throw new PlangonautError(`${label} file is empty: ${resolved}`);
     return text;
   }
   if (optional) return null;
-  throw new BeaveError(`${label} is required: pass --${name} or --${name}-file`);
+  throw new PlangonautError(`${label} is required: pass --${name} or --${name}-file`);
 }
 
 function listFlag(flags: Flags, name: string): string[] {
@@ -4030,7 +4754,7 @@ function listFlag(flags: Flags, name: string): string[] {
   const items = String(raw).split(",").map((value) => value.trim()).filter(Boolean);
   const seen = new Set<string>();
   for (const item of items) {
-    if (seen.has(item)) throw new BeaveError(`--${name} repeats ${item}`);
+    if (seen.has(item)) throw new PlangonautError(`--${name} repeats ${item}`);
     seen.add(item);
   }
   return items;
@@ -4160,7 +4884,7 @@ function interviewLogErrors(root: string, state: any): string[] {
     if (view.path !== QA_VIEW_RELATIVE) errors.push(`interview_view.path must be ${QA_VIEW_RELATIVE}`);
     if (!nonEmpty(view.sha256)) errors.push("interview_view.sha256 is missing");
     else if (sha256(renderInterviewView(state)) !== view.sha256) {
-      errors.push(`interview_view.sha256 does not describe what this state renders; regenerate with: beave qa-log --project-root . --regenerate`);
+      errors.push(`interview_view.sha256 does not describe what this state renders; regenerate with: plangonaut qa-log --project-root . --regenerate`);
     }
   }
 
@@ -4179,9 +4903,9 @@ function interviewViewErrors(root: string, state: any): string[] {
   const view = state.interview_view;
   if (view === undefined || view === null || !nonEmpty(view.sha256)) return [];
   const file = path.join(root, QA_VIEW_RELATIVE);
-  if (!fs.existsSync(file)) return [`${QA_VIEW_RELATIVE} is recorded in state and missing from the project; regenerate with: beave qa-log --project-root . --regenerate`];
+  if (!fs.existsSync(file)) return [`${QA_VIEW_RELATIVE} is recorded in state and missing from the project; regenerate with: plangonaut qa-log --project-root . --regenerate`];
   if (sha256(fs.readFileSync(file)) !== view.sha256) {
-    return [`${QA_VIEW_RELATIVE} was edited outside Beave. It is a derived view: the history is in .beave/state.json, so nothing in it was changed by that edit. Regenerate with: beave qa-log --project-root . --regenerate`];
+    return [`${QA_VIEW_RELATIVE} was edited outside Plangonaut. It is a derived view: the history is in the project ledger, so nothing in it was changed by that edit. Regenerate with: plangonaut qa-log --project-root . --regenerate`];
   }
   return [];
 }
@@ -4218,20 +4942,22 @@ function renderInterviewView(state: any): string {
   const lines: string[] = [
     "# Question and answer history",
     "",
-    "<!-- Generated by Beave from .beave/state.json. Do not edit this file. -->",
-    "<!-- Regenerate with: beave qa-log --project-root . --regenerate -->",
+    "<!-- Generated by Plangonaut from the project ledger. Do not edit this file. -->",
+    "<!-- Regenerate with: plangonaut qa-log --project-root . --regenerate -->",
     "",
     `- Project: ${state.project?.name ?? "not recorded"}`,
     `- History recorded since: ${state.interview_log_since ?? "not recorded"}`,
     `- Interactions: ${entries.length}`,
     "",
-    "This is the record of what Beave asked, what you answered, and what Beave did",
-    "with the answer. It is append-only: a correction adds an entry that supersedes",
-    "the earlier one, and the earlier one stays where it is.",
+    "This is the record of what Plangonaut asked, what you answered, and what",
+    "Plangonaut did with the answer. It is append-only: a correction adds an entry",
+    "that supersedes the earlier one, and the earlier one stays where it is.",
     "",
-    "It is a **derived view**, regenerated from the Beave state. Editing this file",
-    "changes nothing and is reported by `beave validate`; the history lives in",
-    "`.beave/state.json`, with `.beave/events.jsonl` recording how it got there.",
+    "It is a **derived view**, regenerated from the project state. Editing this file",
+    "changes nothing and is reported by `plangonaut validate`; the history lives in",
+    "`.plangonaut/state.json`, with `.plangonaut/events.jsonl` recording how it got",
+    "there \u2014 or in `.beave/`, under those same two names, in a project created",
+    "before the rename.",
     "",
   ];
 
@@ -4239,7 +4965,7 @@ function renderInterviewView(state: any): string {
     lines.push("## No interaction recorded yet", "");
     lines.push(
       state.interview_log_since
-        ? `Nothing has been asked through Beave since ${state.interview_log_since}. Interactions from before that instant, if any, were never recorded and are not reconstructed here.`
+        ? `Nothing has been asked through Plangonaut since ${state.interview_log_since}. Interactions from before that instant, if any, were never recorded and are not reconstructed here.`
         : "Nothing has been recorded yet.",
       ""
     );
@@ -4280,8 +5006,8 @@ function renderInterviewView(state: any): string {
     if (nonEmpty(entry.answer)) lines.push("**Answer, verbatim**", "", ...quoteBlock(entry.answer as string), "");
     else lines.push("**Answer**", "", "No answer is recorded for this question.", "");
 
-    if (nonEmpty(entry.interpretation)) lines.push("**What Beave understood**", "", entry.interpretation as string, "");
-    if (nonEmpty(entry.reply)) lines.push("**What Beave replied**", "", entry.reply as string, "");
+    if (nonEmpty(entry.interpretation)) lines.push("**What Plangonaut understood**", "", entry.interpretation as string, "");
+    if (nonEmpty(entry.reply)) lines.push("**What Plangonaut replied**", "", entry.reply as string, "");
     if (nonEmpty(entry.closed_reason)) lines.push("**Why it was closed**", "", entry.closed_reason as string, "");
 
     if ((entry.consequences ?? []).length) lines.push("**Records created or changed**", "", ...entry.consequences.map((id) => `- ${id}`), "");
@@ -4424,7 +5150,7 @@ function resolveQuestionModule(
 
   if (asked === null) {
     if (wantsDeviation || reason) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `--crosscutting describes a question that belongs to a module other than the one the interview is on, so it needs --module as well. Nothing was written.`,
       );
     }
@@ -4435,21 +5161,21 @@ function resolveQuestionModule(
 
   if (active && asked !== active.id) {
     if (!wantsDeviation) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `Module ${asked} is not the module this interview is on (${active.id} — ${active.title}, ${active.status}). ` +
           `Recording a question against a later module makes the earlier ones look settled when they are not, and against an earlier one hides that you are reopening it. ` +
           `If the question really belongs there, say so: add --crosscutting --crosscutting-reason "<why>". ` +
-          `If module ${active.id} is finished, record it first with \`beave record\`. Nothing was written.`,
+          `If module ${active.id} is finished, record it first with \`plangonaut record\`. Nothing was written.`,
       );
     }
     if (!reason) {
-      throw new BeaveError(`--crosscutting needs --crosscutting-reason: a deviation nobody explained is a deviation nobody can review. Nothing was written.`);
+      throw new PlangonautError(`--crosscutting needs --crosscutting-reason: a deviation nobody explained is a deviation nobody can review. Nothing was written.`);
     }
     return { module: asked, crosscutting: true, reason };
   }
 
   if (wantsDeviation) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `Module ${asked} is the module this interview is on, so --crosscutting describes nothing. Drop it. Nothing was written.`,
     );
   }
@@ -4460,7 +5186,7 @@ function moduleFlag(state: any, raw: unknown): number | null {
   if (!nonEmpty(raw) && typeof raw !== "number") return null;
   const moduleId = Number(raw);
   if (!Number.isInteger(moduleId) || !(state.modules ?? []).some((item: any) => item.id === moduleId)) {
-    throw new BeaveError(`Unknown module: ${raw}`);
+    throw new PlangonautError(`Unknown module: ${raw}`);
   }
   return moduleId;
 }
@@ -4538,7 +5264,7 @@ function qaAsk(flags: Flags): void {
   if (checkIdempotency(root, key)) return console.log(`Idempotent retry: question already recorded.`);
   const { location, state } = loadState(root);
   // Opening a *new* question while a human override is unreconciled is exactly
-  // what `beave next` already refuses. Answering one already in flight is not.
+  // what `plangonaut next` already refuses. Answering one already in flight is not.
   assertNotBlocked(state);
   /*
    * And the same for an unfinished settlement.
@@ -4552,15 +5278,15 @@ function qaAsk(flags: Flags): void {
    */
   const unfinished = openInterviewEntries(state).unapplied;
   if (unfinished.length) {
-    throw new BeaveError(
-      `${unfinished[0].id} has a recorded answer and no recorded consequences. Settle it first: beave qa-settle --project-root . --id ${unfinished[0].id} --interpretation "..." --reply "..." --owner <owner> --operation-id <id>. Nothing was written.`
+    throw new PlangonautError(
+      `${unfinished[0].id} has a recorded answer and no recorded consequences. Settle it first: plangonaut qa-settle --project-root . --id ${unfinished[0].id} --interpretation "..." --reply "..." --owner <owner> --operation-id <id>. Nothing was written.`
     );
   }
   assertKnownOwner(state, required(flags, "owner"));
   const at = now();
   const log = ensureInterviewLog(state, at);
   const id = normalizeQuestionId(required(flags, "id"));
-  if (findInterviewEntry(state, id)) throw new BeaveError(`Question ${id} already exists. Use qa-supersede to replace it; the history is append-only.`);
+  if (findInterviewEntry(state, id)) throw new PlangonautError(`Question ${id} already exists. Use qa-supersede to replace it; the history is append-only.`);
   const entry = newInterviewEntry(state, entryInputFromFlags(state, flags, id, flags.planned === true), at);
   /*
    * "Reconstructed from durable evidence" was an unverified self-declaration:
@@ -4572,10 +5298,10 @@ function qaAsk(flags: Flags): void {
    */
   if (entry.reconstructed) {
     if (!nonEmpty(entry.reconstructed_from)) {
-      throw new BeaveError(`--reconstructed needs --reconstructed-from <file>: an entry that claims to come from durable evidence has to name it. Nothing was written.`);
+      throw new PlangonautError(`--reconstructed needs --reconstructed-from <file>: an entry that claims to come from durable evidence has to name it. Nothing was written.`);
     }
     if (!existingFileInside(root, entry.reconstructed_from as string)) {
-      throw new BeaveError(`Reconstruction evidence does not exist inside the project: ${entry.reconstructed_from}. Nothing was written.`);
+      throw new PlangonautError(`Reconstruction evidence does not exist inside the project: ${entry.reconstructed_from}. Nothing was written.`);
     }
     entry.asked_at = null;
     entry.status = "PLANNED";
@@ -4621,9 +5347,9 @@ function qaAnswer(flags: Flags): void {
   ensureInterviewLog(state, at);
   const id = normalizeQuestionId(required(flags, "id"));
   const entry = findInterviewEntry(state, id);
-  if (!entry) throw new BeaveError(`Unknown question: ${id}`);
-  if (entry.status === "ANSWERED") throw new BeaveError(`${id} already carries an answer. Record a correction with qa-supersede so the earlier answer is preserved.`);
-  if (!new Set(["PLANNED", "ASKED"]).has(entry.status)) throw new BeaveError(`${id} is ${entry.status} and cannot be answered.`);
+  if (!entry) throw new PlangonautError(`Unknown question: ${id}`);
+  if (entry.status === "ANSWERED") throw new PlangonautError(`${id} already carries an answer. Record a correction with qa-supersede so the earlier answer is preserved.`);
+  if (!new Set(["PLANNED", "ASKED"]).has(entry.status)) throw new PlangonautError(`${id} is ${entry.status} and cannot be answered.`);
   const answer = textOrFile(flags, "answer", "Answer") as string;
   entry.answer = answer;
   entry.answered_at = at;
@@ -4661,14 +5387,14 @@ function qaSettle(flags: Flags): void {
   const log = ensureInterviewLog(state, at);
   const id = normalizeQuestionId(required(flags, "id"));
   const entry = findInterviewEntry(state, id);
-  if (!entry) throw new BeaveError(`Unknown question: ${id}`);
-  if (entry.status !== "ANSWERED") throw new BeaveError(`${id} is ${entry.status}; there is no answer to apply.`);
-  if (entry.consequences_recorded_at) throw new BeaveError(`${id} was already settled at ${entry.consequences_recorded_at}. Record a correction with qa-supersede.`);
+  if (!entry) throw new PlangonautError(`Unknown question: ${id}`);
+  if (entry.status !== "ANSWERED") throw new PlangonautError(`${id} is ${entry.status}; there is no answer to apply.`);
+  if (entry.consequences_recorded_at) throw new PlangonautError(`${id} was already settled at ${entry.consequences_recorded_at}. Record a correction with qa-supersede.`);
 
   const consequences = listFlag(flags, "consequences");
   const records = knownRecordIds(state);
   const unknown = consequences.filter((value) => !records.has(value));
-  if (unknown.length) throw new BeaveError(`These consequences are not records in this project: ${unknown.join(", ")}. Record them first; nothing was written.`);
+  if (unknown.length) throw new PlangonautError(`These consequences are not records in this project: ${unknown.join(", ")}. Record them first; nothing was written.`);
 
   /*
    * And it has to be a record this answer actually touched.
@@ -4687,14 +5413,14 @@ function qaSettle(flags: Flags): void {
     return typeof updated === "string" && updated < askedAt;
   });
   if (stale.length) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `These records were last changed before ${entry.id} was asked, so this answer did not create or change them: ${stale.join(", ")}. Record the change first, or leave them out — the history says "created or changed" and must mean it. Nothing was written.`
     );
   }
 
   const documents = listFlag(flags, "documents").map((value) => canonicalRelative(value));
   for (const document of documents) {
-    if (!existingFileInside(root, document)) throw new BeaveError(`Document does not exist inside the project: ${document}`);
+    if (!existingFileInside(root, document)) throw new PlangonautError(`Document does not exist inside the project: ${document}`);
   }
 
   entry.interpretation = textOrFile(flags, "interpretation", "Interpretation") as string;
@@ -4716,7 +5442,7 @@ function qaSettle(flags: Flags): void {
   entry.next_id = nonEmpty(flags["next-id"]) ? normalizeQuestionId(String(flags["next-id"])) : null;
   if (entry.next_id && !findInterviewEntry(state, entry.next_id)) {
     if (!nonEmpty(entry.next_question)) {
-      throw new BeaveError(`--next-id ${entry.next_id} is not in the ledger. Supply --next-question so it can be opened, or name a question that already exists.`);
+      throw new PlangonautError(`--next-id ${entry.next_id} is not in the ledger. Supply --next-question so it can be opened, or name a question that already exists.`);
     }
     log.push(
       newInterviewEntry(
@@ -4780,15 +5506,15 @@ function qaSettle(flags: Flags): void {
   const wantsModule = nonEmpty(flags["complete-module"]);
   if (wantsModule || nonEmpty(flags["module-answer-file"])) {
     if (!wantsModule || !nonEmpty(flags["module-answer-file"])) {
-      throw new BeaveError(`--complete-module and --module-answer-file go together: a module outcome without its recorded evidence is not a record. Nothing was written.`);
+      throw new PlangonautError(`--complete-module and --module-answer-file go together: a module outcome without its recorded evidence is not a record. Nothing was written.`);
     }
     if (entry.module === null || entry.module === undefined) {
-      throw new BeaveError(`${entry.id} is not recorded against any module, so settling it cannot complete one. Nothing was written.`);
+      throw new PlangonautError(`${entry.id} is not recorded against any module, so settling it cannot complete one. Nothing was written.`);
     }
     if (entry.crosscutting === true) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `${entry.id} is a crosscutting question (module ${entry.module}: ${entry.crosscutting_reason ?? "no reason recorded"}). ` +
-          `A detour does not close the module it detoured into. Record that module with \`beave record\` when its own questions are done. Nothing was written.`,
+          `A detour does not close the module it detoured into. Record that module with \`plangonaut record\` when its own questions are done. Nothing was written.`,
       );
     }
     const applied = applyModuleOutcome(
@@ -4852,12 +5578,12 @@ function qaClose(flags: Flags): void {
   const at = now();
   ensureInterviewLog(state, at);
   const kind = String(required(flags, "kind")).toLowerCase();
-  if (!QA_CLOSE_KINDS.has(kind)) throw new BeaveError(`--kind must be one of ${[...QA_CLOSE_KINDS].join(", ")}`);
+  if (!QA_CLOSE_KINDS.has(kind)) throw new PlangonautError(`--kind must be one of ${[...QA_CLOSE_KINDS].join(", ")}`);
   const id = normalizeQuestionId(required(flags, "id"));
   const entry = findInterviewEntry(state, id);
-  if (!entry) throw new BeaveError(`Unknown question: ${id}`);
-  if (new Set(["SUPERSEDED", "DEFERRED", "SKIPPED", "INVALIDATED"]).has(entry.status)) throw new BeaveError(`${id} is already ${entry.status}.`);
-  if (kind !== "invalidated" && entry.status === "ANSWERED") throw new BeaveError(`${id} has an answer; it cannot be ${kind}. Use --kind invalidated if the answer no longer holds.`);
+  if (!entry) throw new PlangonautError(`Unknown question: ${id}`);
+  if (new Set(["SUPERSEDED", "DEFERRED", "SKIPPED", "INVALIDATED"]).has(entry.status)) throw new PlangonautError(`${id} is already ${entry.status}.`);
+  if (kind !== "invalidated" && entry.status === "ANSWERED") throw new PlangonautError(`${id} has an answer; it cannot be ${kind}. Use --kind invalidated if the answer no longer holds.`);
   const reason = textOrFile(flags, "reason", "Reason") as string;
   entry.status = kind.toUpperCase();
   entry.closed_reason = reason;
@@ -4899,17 +5625,17 @@ function qaSupersede(flags: Flags): void {
   const log = ensureInterviewLog(state, at);
   const unsettled = openInterviewEntries(state).unapplied;
   if (unsettled.length) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `${unsettled[0].id} has a recorded answer and no recorded consequences. Settle it before replacing any question: a superseded entry stops being reported as open, so this would hide the unfinished work rather than finish it. Nothing was written.`
     );
   }
   const oldId = normalizeQuestionId(required(flags, "id"));
   const newId = normalizeQuestionId(required(flags, "new-id"));
-  if (oldId === newId) throw new BeaveError(`A question cannot supersede itself.`);
+  if (oldId === newId) throw new PlangonautError(`A question cannot supersede itself.`);
   const previous = findInterviewEntry(state, oldId);
-  if (!previous) throw new BeaveError(`Unknown question: ${oldId}`);
-  if (previous.status === "SUPERSEDED") throw new BeaveError(`${oldId} was already superseded by ${previous.superseded_by}.`);
-  if (findInterviewEntry(state, newId)) throw new BeaveError(`${newId} already exists.`);
+  if (!previous) throw new PlangonautError(`Unknown question: ${oldId}`);
+  if (previous.status === "SUPERSEDED") throw new PlangonautError(`${oldId} was already superseded by ${previous.superseded_by}.`);
+  if (findInterviewEntry(state, newId)) throw new PlangonautError(`${newId} already exists.`);
   const reason = textOrFile(flags, "reason", "Reason") as string;
 
   // The replacement is a new entry. The old one keeps its question, its answer
@@ -4951,7 +5677,7 @@ function qaLog(flags: Flags): void {
     const recorded = state.interview_view?.sha256 ?? null;
     writeInterviewView(root, rendered);
     if (recorded && recorded !== digest) {
-      console.log(`Regenerated ${QA_VIEW_RELATIVE}. The digest recorded in state (${recorded.slice(0, 12)}) does not match what this state renders (${digest.slice(0, 12)}): the state was changed by something other than a qa command. Run beave validate.`);
+      console.log(`Regenerated ${QA_VIEW_RELATIVE}. The digest recorded in state (${recorded.slice(0, 12)}) does not match what this state renders (${digest.slice(0, 12)}): the state was changed by something other than a qa command. Run plangonaut validate.`);
       return;
     }
     console.log(`Regenerated ${QA_VIEW_RELATIVE} from the ledger.`);
@@ -4960,7 +5686,7 @@ function qaLog(flags: Flags): void {
 
   if (nonEmpty(flags.id)) {
     const entry = findInterviewEntry(state, normalizeQuestionId(String(flags.id)));
-    if (!entry) throw new BeaveError(`Unknown question: ${flags.id}`);
+    if (!entry) throw new PlangonautError(`Unknown question: ${flags.id}`);
     console.log(JSON.stringify(entry, null, 2));
     return;
   }
@@ -5027,7 +5753,7 @@ function interviewMarkdown(state: any): string[] {
   if (!Array.isArray(state.interview_log)) {
     lines.push(
       "- This project predates the interview ledger. No question or answer was recorded, which is not the same as no question having been asked.",
-      "- Start recording with `beave qa-ask`; earlier interactions are not reconstructed.",
+      "- Start recording with `plangonaut qa-ask`; earlier interactions are not reconstructed.",
       ""
     );
     return lines;
@@ -5078,7 +5804,7 @@ function interviewMarkdown(state: any): string[] {
     lines.push(...outstanding);
   }
   for (const entry of open.asked) lines.push(`- **Asked and unanswered:** ${entry.id} — ${entry.question}`);
-  for (const entry of open.unapplied) lines.push(`- **Answered and not applied:** ${entry.id} — the answer is recorded and its consequences are not. Settle it with \`beave qa-settle\` before asking anything else.`);
+  for (const entry of open.unapplied) lines.push(`- **Answered and not applied:** ${entry.id} — the answer is recorded and its consequences are not. Settle it with \`plangonaut qa-settle\` before asking anything else.`);
   for (const entry of open.planned) lines.push(`- Planned, not asked: ${entry.id} — ${entry.question}`);
   if (!open.asked.length && !open.unapplied.length && !open.planned.length) lines.push("- Nothing open in the interview.");
 
@@ -5126,7 +5852,7 @@ function resumeFrontier(state: any): string[] {
 
   if (open.unapplied.length) {
     lines.push(
-      `**First, finish what is open.** ${open.unapplied[0].id} has a recorded answer and no recorded consequences. Settle it with \`beave qa-settle\` before putting any new question to the user: until then the interview has an unfinished transaction, and \`qa-ask\` will refuse.`,
+      `**First, finish what is open.** ${open.unapplied[0].id} has a recorded answer and no recorded consequences. Settle it with \`plangonaut qa-settle\` before putting any new question to the user: until then the interview has an unfinished transaction, and \`qa-ask\` will refuse.`,
       ""
     );
   }
@@ -5171,7 +5897,7 @@ function resume(flags: Flags): void {
     // And it exits non-zero. It used to print that and return 0, so a caller
     // checking the exit code saw success on the one output that says the project
     // cannot be trusted — `validate` has always exited 2 on the same condition.
-    throw new BeaveError("Resume is blocked: the state does not agree with its history. The report above says which fields, and how to rebuild them.");
+    throw new PlangonautError("Resume is blocked: the state does not agree with its history. The report above says which fields, and how to rebuild them.");
   }
   const regenerated = regenerateDerivedViews(root);
   if (state.needs_reconciliation) {
@@ -5180,7 +5906,7 @@ function resume(flags: Flags): void {
     // the status code must not see success on an output whose heading is
     // "Resume blocked". The second review found this branch still returning 0
     // after the other one had been fixed.
-    throw new BeaveError("Resume is blocked: an open human override has to be reconciled before normal work continues. The report above says which.");
+    throw new PlangonautError("Resume is blocked: an open human override has to be reconciled before normal work continues. The report above says which.");
   }
   // The heading used to read "Resume questions", and a fresh recipient in the
   // ALN-005 handoff test took it as an instruction: it went to interview the user
@@ -5190,7 +5916,7 @@ function resume(flags: Flags): void {
   // the heading now says which is which.
   const integrity: string[] = [];
   if (recovered.length) {
-    integrity.push("## An interrupted operation was recovered", "", "The last run of Beave on this project did not finish. It has been resolved before anything below was read:", "");
+    integrity.push("## An interrupted operation was recovered", "", "The last run of Plangonaut on this project did not finish. It has been resolved before anything below was read:", "");
     for (const line of recovered) integrity.push(`- ${line}`);
     integrity.push("");
   }
@@ -5200,7 +5926,7 @@ function resume(flags: Flags): void {
     for (const item of stagings) {
       integrity.push(`- a package for \`${item.note.destination}\` was left at phase ${item.note.phase}, started ${item.note.created_at}${item.alive ? " by a process that is still running" : ""}.`);
     }
-    integrity.push("", "Nothing in the project changed: an export only ever reads it. Run `beave recover --project-root . --apply` to clear what is left beside the destination, then export again.", "");
+    integrity.push("", "Nothing in the project changed: an export only ever reads it. Run `plangonaut recover --project-root . --apply` to clear what is left beside the destination, then export again.", "");
   }
   if (regenerated.length) {
     integrity.push("## A derived view was regenerated", "", `${regenerated.join("; ")}. The canonical state was intact, so the document was rebuilt from it rather than the other way round.`, "");
@@ -5229,17 +5955,17 @@ function applyModuleOutcome(
   at: string,
 ): { module: Module; outcome: string; nextActionNote: string | null } {
   const outcome = input.status.toUpperCase().replaceAll("_", " ");
-  if (!MODULE_STATUSES.has(outcome)) throw new BeaveError(`Unsupported module status: ${outcome}`);
+  if (!MODULE_STATUSES.has(outcome)) throw new PlangonautError(`Unsupported module status: ${outcome}`);
   const sourcePath = path.resolve(input.answerFile);
   const answerRelative = path.relative(root, sourcePath);
   const answerRefusal = artifactPathRefusal("Answer evidence", answerRelative);
-  if (answerRefusal) throw new BeaveError(answerRefusal);
+  if (answerRefusal) throw new PlangonautError(answerRefusal);
   const confinedAnswer = existingFileInside(root, answerRelative);
-  if (!confinedAnswer) throw new BeaveError(`Answer evidence must be an existing file inside the project root`);
+  if (!confinedAnswer) throw new PlangonautError(`Answer evidence must be an existing file inside the project root`);
   const bytes = fs.readFileSync(confinedAnswer);
-  if (!bytes.length || !bytes.toString("utf8").trim()) throw new BeaveError(`Answer evidence cannot be empty: ${sourcePath}`);
+  if (!bytes.length || !bytes.toString("utf8").trim()) throw new PlangonautError(`Answer evidence cannot be empty: ${sourcePath}`);
   const module = state.modules.find((item) => item.id === input.moduleId);
-  if (!module) throw new BeaveError(`Unknown module: ${input.moduleId}`);
+  if (!module) throw new PlangonautError(`Unknown module: ${input.moduleId}`);
   Object.assign(module, {
     status: outcome,
     owner: input.owner,
@@ -5301,7 +6027,7 @@ function override(flags: Flags): void {
   const item = { id: `OVR-${crypto.randomBytes(6).toString("hex")}`, status: "OPEN", owner: required(flags, "owner"), reason: typeof flags.reason === 'string' ? flags.reason : "Human direction changed by prompt", source: canonicalRelative(path.relative(root, sourcePath)) || path.basename(sourcePath), source_sha256: sha256(bytes), summary: bytes.toString("utf8").replace(/\s+/g, " ").slice(0, 240), created_at: timestamp };
   state.human_overrides.push(item);
   state.needs_reconciliation = true;
-  // `needs_reconciliation` already carries the block, and `beave next` refuses on
+  // `needs_reconciliation` already carries the block, and `plangonaut next` refuses on
   // it, so the reconciliation requirement does not need this field to be heard.
   // A next action a person wrote does need it, and an override recorded on a
   // folder carrying a handoff instruction used to destroy it without a word.
@@ -5354,7 +6080,7 @@ function reconcile(flags: Flags): void {
   const { location, state } = loadState(root);
   assertKnownOwner(state, required(flags, "owner"));
   const item = state.human_overrides.find((entry) => entry.id === required(flags, "override-id"));
-  if (!item || item.status !== "OPEN") throw new BeaveError(`Open override not found: ${flags["override-id"]}`);
+  if (!item || item.status !== "OPEN") throw new PlangonautError(`Open override not found: ${flags["override-id"]}`);
   // Reconciliation evidence is a document the recipient has to be able to read,
   // so it obeys the rule every other travelling record obeys: an existing,
   // non-empty file inside the project and outside the reserved `.beave`. It used
@@ -5363,14 +6089,14 @@ function reconcile(flags: Flags): void {
   const evidencePath = path.resolve(required(flags, "evidence-file"));
   const evidenceRelative = canonicalRelative(path.relative(root, evidencePath));
   const evidenceRefusal = artifactPathRefusal("Reconciliation evidence", evidenceRelative);
-  if (evidenceRefusal) throw new BeaveError(`${evidenceRefusal}\nNothing was written.`);
+  if (evidenceRefusal) throw new PlangonautError(`${evidenceRefusal}\nNothing was written.`);
   const confinedEvidence = existingFileInside(root, evidenceRelative);
-  if (!confinedEvidence) throw new BeaveError(`Reconciliation evidence must be an existing file inside the project root: ${evidencePath}\nNothing was written.`);
+  if (!confinedEvidence) throw new PlangonautError(`Reconciliation evidence must be an existing file inside the project root: ${evidencePath}\nNothing was written.`);
   const bytes = fs.readFileSync(confinedEvidence);
-  if (!bytes.length || !bytes.toString("utf8").trim()) throw new BeaveError(`Reconciliation evidence cannot be empty: ${evidenceRelative}\nNothing was written.`);
+  if (!bytes.length || !bytes.toString("utf8").trim()) throw new PlangonautError(`Reconciliation evidence cannot be empty: ${evidenceRelative}\nNothing was written.`);
 
   const supplied = typeof flags["next-action"] === "string" ? String(flags["next-action"]).trim() : null;
-  if (typeof flags["next-action"] === "string" && !supplied) throw new BeaveError(`--next-action cannot be empty. Omit it to keep what is recorded. Nothing was written.`);
+  if (typeof flags["next-action"] === "string" && !supplied) throw new PlangonautError(`--next-action cannot be empty. Omit it to keep what is recorded. Nothing was written.`);
   const replaceRequested = Boolean(flags["replace-human-next-action"]);
   const previousAction = typeof state.exact_next_action === "string" ? state.exact_next_action : "";
   const humanWroteIt = !engineWroteNextAction(previousAction);
@@ -5380,7 +6106,7 @@ function reconcile(flags: Flags): void {
   // another override is still open: in that case nothing the caller supplied is
   // applied anyway, so there is no replacement to consent to.
   if (!open.length && humanWroteIt && supplied && supplied !== previousAction && !replaceRequested) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `Refusing to replace the exact next action: it was written by a person, and --next-action alone is not the intention to replace it.\n` +
       `  recorded: ${previousAction}\n` +
       `  supplied: ${supplied}\n` +
@@ -5390,7 +6116,7 @@ function reconcile(flags: Flags): void {
     );
   }
   if (replaceRequested && !supplied) {
-    throw new BeaveError(`--replace-human-next-action needs the sentence that replaces it: pass --next-action TEXT as well. Nothing was written.`);
+    throw new PlangonautError(`--replace-human-next-action needs the sentence that replaces it: pass --next-action TEXT as well. Nothing was written.`);
   }
 
   const timestamp = now();
@@ -5447,7 +6173,7 @@ function reconcile(flags: Flags): void {
     console.log(`
 The exact next action was written by a person and is kept unchanged: "${resulting}"${supplied ? `
 You supplied the same sentence, so nothing was replaced.` : ``}
-To replace it deliberately, re-run with --next-action TEXT --replace-human-next-action, or use beave checkpoint --next-action.`);
+To replace it deliberately, re-run with --next-action TEXT --replace-human-next-action, or use plangonaut checkpoint --next-action.`);
   } else if (outcome === "replaced") {
     console.log(`
 The exact next action written by a person was replaced, as --replace-human-next-action asked.
@@ -5461,18 +6187,18 @@ The next action was set to the blocker sentence, because ${others} still open an
   was: ${previousAction || "<nothing recorded>"}
   now: ${resulting}${supplied ? `
 The sentence you supplied was NOT recorded in state: "${supplied}"
-Supply it again on the reconcile that closes the last open override, or write it deliberately afterwards with beave checkpoint --next-action.` : ``}
+Supply it again on the reconcile that closes the last open override, or write it deliberately afterwards with plangonaut checkpoint --next-action.` : ``}
 The previous sentence is kept verbatim in event ${eventId} as next_action_before.`);
   } else {
     console.log(`
 The exact next action is now: ${resulting}${supplied ? `` : `
-No --next-action was supplied and nothing a person had written was recorded, so the engine wrote its own sentence. Replace it whenever you want with beave checkpoint --next-action.`}`);
+No --next-action was supplied and nothing a person had written was recorded, so the engine wrote its own sentence. Replace it whenever you want with plangonaut checkpoint --next-action.`}`);
   }
 }
 
 function ledgerMutation(kind: string, flags: Flags): void {
   const rule = LEDGER_RULES[kind];
-  if (!rule) throw new BeaveError(`Unsupported ledger: ${kind}`);
+  if (!rule) throw new PlangonautError(`Unsupported ledger: ${kind}`);
   const root = resolveProject(required(flags, "project-root"));
   const key = idempotencyKey(flags);
   if (checkIdempotency(root, key)) return console.log(`Idempotent retry: ${kind} already applied.`);
@@ -5481,49 +6207,49 @@ function ledgerMutation(kind: string, flags: Flags): void {
   const owner = required(flags, "owner").trim();
   assertKnownOwner(state, owner);
   const id = required(flags, "id").toUpperCase();
-  if (!validTypedId(id, rule.prefix)) throw new BeaveError(`Invalid ${kind} ID: ${id}. Expected ${rule.prefix}- followed by uppercase letters, numbers, _ or -.`);
+  if (!validTypedId(id, rule.prefix)) throw new PlangonautError(`Invalid ${kind} ID: ${id}. Expected ${rule.prefix}- followed by uppercase letters, numbers, _ or -.`);
   const ledger = state[rule.array] as unknown as any[];
   const existing = ledger.find((item) => item.id === id);
   if (existing) {
     const expected = Number(required(flags, "expected-revision"));
-    if (!Number.isInteger(expected) || expected !== existing.revision) throw new BeaveError(`Stale ${kind} ${id}: expected revision ${existing.revision}. No changes written.`);
+    if (!Number.isInteger(expected) || expected !== existing.revision) throw new PlangonautError(`Stale ${kind} ${id}: expected revision ${existing.revision}. No changes written.`);
   }
   const timestamp = now();
   let record: any;
   if (kind === "decision" || kind === "requirement" || kind === "task") {
     const status = required(flags, "status").toUpperCase();
-    if (!rule.statuses!.has(status)) throw new BeaveError(`Unsupported ${kind} status: ${status}`);
+    if (!rule.statuses!.has(status)) throw new PlangonautError(`Unsupported ${kind} status: ${status}`);
     record = { id, title: required(flags, "title").trim(), status, owner };
-    if (!record.title) throw new BeaveError(`--title cannot be empty`);
+    if (!record.title) throw new PlangonautError(`--title cannot be empty`);
   } else if (kind === "dependency") {
     const type = required(flags, "type").toUpperCase();
-    if (!rule.statuses!.has(type)) throw new BeaveError(`Unsupported dependency type: ${type}`);
+    if (!rule.statuses!.has(type)) throw new PlangonautError(`Unsupported dependency type: ${type}`);
     record = { id, from: required(flags, "from").toUpperCase(), to: required(flags, "to").toUpperCase(), type, owner };
   } else if (kind === "risk") {
     const status = required(flags, "status").toUpperCase();
     const severity = required(flags, "severity").toUpperCase();
-    if (!rule.statuses!.has(status)) throw new BeaveError(`Unsupported risk status: ${status}`);
-    if (!new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).has(severity)) throw new BeaveError(`Unsupported risk severity: ${severity}`);
+    if (!rule.statuses!.has(status)) throw new PlangonautError(`Unsupported risk status: ${status}`);
+    if (!new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).has(severity)) throw new PlangonautError(`Unsupported risk severity: ${severity}`);
     record = { id, title: required(flags, "title").trim(), severity, status, owner };
-    if (!record.title) throw new BeaveError(`--title cannot be empty`);
+    if (!record.title) throw new PlangonautError(`--title cannot be empty`);
   } else if (kind === "agent") {
     const status = required(flags, "status").toUpperCase();
-    if (!rule.statuses!.has(status)) throw new BeaveError(`Unsupported agent status: ${status}`);
+    if (!rule.statuses!.has(status)) throw new PlangonautError(`Unsupported agent status: ${status}`);
     record = { id, name: required(flags, "name").trim(), status, owner };
-    if (!record.name) throw new BeaveError(`--name cannot be empty`);
+    if (!record.name) throw new PlangonautError(`--name cannot be empty`);
   } else if (kind === "evidence") {
     const file = path.resolve(required(flags, "file"));
     const relative = path.relative(root, file);
     const evidenceRefusal = artifactPathRefusal("Evidence", relative);
-    if (evidenceRefusal) throw new BeaveError(evidenceRefusal);
+    if (evidenceRefusal) throw new PlangonautError(evidenceRefusal);
     const confined = existingFileInside(root, relative);
-    if (!confined) throw new BeaveError(`Evidence must be an existing file inside the project root`);
+    if (!confined) throw new PlangonautError(`Evidence must be an existing file inside the project root`);
     const bytes = fs.readFileSync(confined);
-    if (!bytes.length) throw new BeaveError(`Evidence file is empty: ${relative}`);
+    if (!bytes.length) throw new PlangonautError(`Evidence file is empty: ${relative}`);
     record = { id, path: relative.replaceAll("\\", "/"), sha256: sha256(bytes), owner };
   } else {
     record = { id, name: required(flags, "name").trim(), owner };
-    if (!record.name) throw new BeaveError(`--name cannot be empty`);
+    if (!record.name) throw new PlangonautError(`--name cannot be empty`);
     if (!existing) record.created_at = timestamp;
   }
   record.revision = (existing?.revision ?? 0) + 1;
@@ -5534,7 +6260,7 @@ function ledgerMutation(kind: string, flags: Flags): void {
 
   if (kind === "checkpoint" && typeof flags["next-action"] === "string") {
     const nextAction = String(flags["next-action"]).trim();
-    if (!nextAction) throw new BeaveError(`--next-action cannot be empty`);
+    if (!nextAction) throw new PlangonautError(`--next-action cannot be empty`);
     state.exact_next_action = nextAction;
   }
 
@@ -5559,11 +6285,11 @@ function ledgerMutation(kind: string, flags: Flags): void {
 function verifiedEvidence(root: string, sourcePath: string): { relative: string; hash: string } {
   const relative = path.relative(root, sourcePath);
   const evidenceRefusal = artifactPathRefusal("Evidence", relative);
-    if (evidenceRefusal) throw new BeaveError(evidenceRefusal);
+    if (evidenceRefusal) throw new PlangonautError(evidenceRefusal);
   const confined = existingFileInside(root, relative);
-  if (!confined) throw new BeaveError(`Evidence must be an existing file inside the project root`);
+  if (!confined) throw new PlangonautError(`Evidence must be an existing file inside the project root`);
   const bytes = fs.readFileSync(confined);
-  if (!bytes.length || !bytes.toString("utf8").trim()) throw new BeaveError(`Evidence file is empty: ${sourcePath}`);
+  if (!bytes.length || !bytes.toString("utf8").trim()) throw new PlangonautError(`Evidence file is empty: ${sourcePath}`);
   return { relative: (relative || path.basename(sourcePath)).replaceAll("\\", "/"), hash: sha256(bytes) };
 }
 
@@ -5606,7 +6332,9 @@ function gatePrerequisiteErrors(root: string, state: State, gateId: string): str
     const unsafe = state.risks.filter((item) => new Set(["HIGH", "CRITICAL"]).has(item.severity) && new Set(["IDENTIFIED", "REALIZED"]).has(item.status));
     if (unsafe.length) errors.push(`unresolved high risks: ${unsafe.map((item) => item.id).join(", ")}`);
   }
-  if (gate >= 11 && (state.blockers.length || state.needs_reconciliation)) errors.push("open blockers or reconciliation remain");
+  // Open ones. A resolved blocker is history and must not hold a gate shut for
+  // ever, which is what counting the whole array did.
+  if (gate >= 11 && (openBlockers(state).length || state.needs_reconciliation)) errors.push("open blockers or reconciliation remain");
   if (gate === 12 && !state.checkpoints.length) errors.push("an operational checkpoint is required");
   return errors;
 }
@@ -5626,16 +6354,16 @@ function gate(flags: Flags): void {
   const gateId = required(flags, "id");
   const status = required(flags, "status");
   if (!new Set(["PASSED", "WARN", "BLOCKED", "NOT_APPLICABLE"]).has(status)) {
-    throw new BeaveError(`Invalid gate status: ${status}. Must be PASSED, WARN, BLOCKED, or NOT_APPLICABLE.`);
+    throw new PlangonautError(`Invalid gate status: ${status}. Must be PASSED, WARN, BLOCKED, or NOT_APPLICABLE.`);
   }
   if (!/^G([0-9]|1[0-2])$/.test(gateId)) {
-    throw new BeaveError(`Invalid gate ID: ${gateId}. Must be G0 through G12.`);
+    throw new PlangonautError(`Invalid gate ID: ${gateId}. Must be G0 through G12.`);
   }
   
   const gateNumber = parseInt(gateId.slice(1), 10);
   const currentGateNumber = parseInt(state.current_gate.slice(1), 10);
   if (gateNumber > currentGateNumber) {
-    throw new BeaveError(`Cannot process ${gateId} before completing ${state.current_gate}`);
+    throw new PlangonautError(`Cannot process ${gateId} before completing ${state.current_gate}`);
   }
   
   const sourcePath = flags["evidence-file"] ? path.resolve(String(flags["evidence-file"])) : null;
@@ -5645,12 +6373,12 @@ function gate(flags: Flags): void {
     evidenceStr = evidence.relative;
     evidenceSha256 = evidence.hash;
   } else {
-    throw new BeaveError("--evidence-file is required for every gate outcome");
+    throw new PlangonautError("--evidence-file is required for every gate outcome");
   }
 
   if (status === "PASSED" || status === "WARN" || status === "NOT_APPLICABLE") {
     const prerequisiteErrors = gatePrerequisiteErrors(root, state, gateId);
-    if (prerequisiteErrors.length) throw new BeaveError(`Cannot complete ${gateId}:\n- ${prerequisiteErrors.join("\n- ")}`);
+    if (prerequisiteErrors.length) throw new PlangonautError(`Cannot complete ${gateId}:\n- ${prerequisiteErrors.join("\n- ")}`);
   }
 
   // `lifecycle.md` line 55: "WARN requires an owner, consequence, and review
@@ -5663,15 +6391,15 @@ function gate(flags: Flags): void {
   const reviewDate = flags["review-date"] ? String(flags["review-date"]).trim() : "";
   if (status === "WARN") {
     if (!consequence || !reviewDate) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `A WARN gate requires --consequence and --review-date as well as --owner (lifecycle.md: "WARN requires an owner, consequence, and review date"). Nothing was written.`
       );
     }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewDate)) {
-      throw new BeaveError(`--review-date must be an ISO date (YYYY-MM-DD); received ${reviewDate}`);
+      throw new PlangonautError(`--review-date must be an ISO date (YYYY-MM-DD); received ${reviewDate}`);
     }
   } else if (consequence || reviewDate) {
-    throw new BeaveError(`--consequence and --review-date belong to a WARN outcome, not to ${status}`);
+    throw new PlangonautError(`--consequence and --review-date belong to a WARN outcome, not to ${status}`);
   }
   
   const timestamp = now();
@@ -5747,7 +6475,7 @@ function contextPack(flags: Flags): void {
   const content = contextMarkdown(validateRoot(root), 3);
   if (!flags.output) return console.log(content.trimEnd());
   const relative = String(flags.output);
-  if (path.isAbsolute(relative) || relative.split(/[\\/]/).includes("..")) throw new BeaveError("Context output must stay under .beave/context");
+  if (path.isAbsolute(relative) || relative.split(/[\\/]/).includes("..")) throw new PlangonautError("Context output must stay under .beave/context");
   const output = boundedOutput(stateRoot(root), path.join("context", relative));
   atomicWrite(output, content);
   console.log(`Wrote context pack to ${output}`);
@@ -5761,51 +6489,51 @@ function copyFileCreatingParents(source: string, destination: string): void {
 function packageManifest(packageRoot: string): any {
   const location = path.join(packageRoot, "manifest.json");
   const manifest = readJson(location);
-  if (manifest.format !== "beave-project-package-v1" || !Array.isArray(manifest.files)) throw new BeaveError(`Unsupported project package manifest`);
+  if (!PACKAGE_FORMATS.includes(String(manifest.format)) || !Array.isArray(manifest.files)) throw new PlangonautError(`Unsupported project package manifest`);
   const seen = new Set<string>();
   for (const item of manifest.files) {
-    if (!safeProjectRelative(item?.path) || !/^[a-f0-9]{64}$/.test(item?.sha256 ?? "") || !Number.isInteger(item?.bytes) || item.bytes < 0) throw new BeaveError(`Invalid package file entry`);
+    if (!safeProjectRelative(item?.path) || !/^[a-f0-9]{64}$/.test(item?.sha256 ?? "") || !Number.isInteger(item?.bytes) || item.bytes < 0) throw new PlangonautError(`Invalid package file entry`);
     // Blocker 4. The package is the thing that crosses machines, so its manifest
     // is held to the canonical spelling rather than merely tolerating both: a
     // `files\docs\plan.md` entry is a single file name on the recipient's POSIX
     // filesystem, and the package would unpack into something nobody asked for.
-    if (String(item.path).includes("\\")) throw new BeaveError(`Package file entry must use "/" as its separator, not "\\": ${item.path}`);
-    if (!(item.path === "state/state.json" || item.path === "state/events.jsonl" || item.path === manifest.entrypoint || item.path.startsWith("files/") || item.path.startsWith("history/") || item.path.startsWith("deletion-reasons/"))) throw new BeaveError(`Unsupported package file entry: ${item.path}`);
+    if (String(item.path).includes("\\")) throw new PlangonautError(`Package file entry must use "/" as its separator, not "\\": ${item.path}`);
+    if (!(item.path === "state/state.json" || item.path === "state/events.jsonl" || item.path === manifest.entrypoint || item.path.startsWith("files/") || item.path.startsWith("history/") || item.path.startsWith("deletion-reasons/"))) throw new PlangonautError(`Unsupported package file entry: ${item.path}`);
     // `history/` lands in `.beave/history/` on import, which is a directory the
     // engine owns: one flat filename, no separators, no traversal.
     if (item.path.startsWith("history/")) {
       const name = item.path.slice("history/".length);
-      if (!name || name.includes("/") || name.includes("\\") || name.startsWith(".")) throw new BeaveError(`Unsafe history entry: ${item.path}`);
+      if (!name || name.includes("/") || name.includes("\\") || name.startsWith(".")) throw new PlangonautError(`Unsafe history entry: ${item.path}`);
     }
     // Same shape, same rule: `deletion-reasons/` lands in `.beave/deletion-reasons/`.
     if (item.path.startsWith("deletion-reasons/")) {
       const name = item.path.slice("deletion-reasons/".length);
-      if (!name || name.includes("/") || name.includes("\\") || name.startsWith(".")) throw new BeaveError(`Unsafe deletion-reason entry: ${item.path}`);
+      if (!name || name.includes("/") || name.includes("\\") || name.startsWith(".")) throw new PlangonautError(`Unsafe deletion-reason entry: ${item.path}`);
     }
-    if (item.path.startsWith("files/") && !safeArtifactPath(item.path.slice("files/".length))) throw new BeaveError(`Package file targets a reserved or unsafe project path: ${item.path}`);
-    if (seen.has(item.path)) throw new BeaveError(`Duplicate package file entry: ${item.path}`);
+    if (item.path.startsWith("files/") && !safeArtifactPath(item.path.slice("files/".length))) throw new PlangonautError(`Package file targets a reserved or unsafe project path: ${item.path}`);
+    if (seen.has(item.path)) throw new PlangonautError(`Duplicate package file entry: ${item.path}`);
     seen.add(item.path);
     const location = existingFileInside(packageRoot, item.path);
-    if (!location) throw new BeaveError(`Package file is missing or escapes the package root: ${item.path}`);
-    if (fs.statSync(location).size !== item.bytes) throw new BeaveError(`Package byte count mismatch: ${item.path}`);
-    if (sha256(fs.readFileSync(location)) !== item.sha256) throw new BeaveError(`Package digest mismatch: ${item.path}`);
+    if (!location) throw new PlangonautError(`Package file is missing or escapes the package root: ${item.path}`);
+    if (fs.statSync(location).size !== item.bytes) throw new PlangonautError(`Package byte count mismatch: ${item.path}`);
+    if (sha256(fs.readFileSync(location)) !== item.sha256) throw new PlangonautError(`Package digest mismatch: ${item.path}`);
   }
-  for (const requiredFile of ["state/state.json", "state/events.jsonl"]) if (!seen.has(requiredFile)) throw new BeaveError(`Package is missing ${requiredFile}`);
-  if (!safeProjectRelative(manifest.entrypoint) || !seen.has(manifest.entrypoint)) throw new BeaveError(`Package entrypoint is invalid or missing`);
+  for (const requiredFile of ["state/state.json", "state/events.jsonl"]) if (!seen.has(requiredFile)) throw new PlangonautError(`Package is missing ${requiredFile}`);
+  if (!safeProjectRelative(manifest.entrypoint) || !seen.has(manifest.entrypoint)) throw new PlangonautError(`Package entrypoint is invalid or missing`);
   const embedded = readJson(path.join(packageRoot, "state", "state.json"));
-  if (manifest.project_name !== embedded.project?.name || manifest.state_revision !== embedded.revision || manifest.schema_version !== embedded.schema_version) throw new BeaveError(`Package metadata does not match embedded state`);
-  const embeddedEvents = fs.readFileSync(path.join(packageRoot, "state", "events.jsonl"), "utf8").split(/\r?\n/).filter(Boolean).map((line, index) => { try { return JSON.parse(line); } catch { throw new BeaveError(`Invalid embedded event JSON at line ${index + 1}`); } });
+  if (manifest.project_name !== embedded.project?.name || manifest.state_revision !== embedded.revision || manifest.schema_version !== embedded.schema_version) throw new PlangonautError(`Package metadata does not match embedded state`);
+  const embeddedEvents = fs.readFileSync(path.join(packageRoot, "state", "events.jsonl"), "utf8").split(/\r?\n/).filter(Boolean).map((line, index) => { try { return JSON.parse(line); } catch { throw new PlangonautError(`Invalid embedded event JSON at line ${index + 1}`); } });
   const latest = embeddedEvents.at(-1);
-  if (!latest || latest.event_id !== embedded.last_event_id || latest.state_revision !== embedded.revision) throw new BeaveError(`Embedded state does not match its latest event`);
+  if (!latest || latest.event_id !== embedded.last_event_id || latest.state_revision !== embedded.revision) throw new PlangonautError(`Embedded state does not match its latest event`);
   for (const artifact of embedded.artifacts ?? []) {
-    if (!safeArtifactPath(artifact.working_path)) throw new BeaveError(`Embedded artifact has unsafe path: ${artifact.id}`);
+    if (!safeArtifactPath(artifact.working_path)) throw new PlangonautError(`Embedded artifact has unsafe path: ${artifact.id}`);
     const workingEntry = `files/${canonicalRelative(artifact.working_path)}`;
-    if (!seen.has(workingEntry)) throw new BeaveError(`Package is missing current artifact file: ${workingEntry}`);
-    if (sha256(fs.readFileSync(path.join(packageRoot, workingEntry))) !== artifact.content_hash) throw new BeaveError(`Embedded artifact hash mismatch: ${artifact.id}`);
-    if (artifact.status === "PUBLISHED" && !seen.has(`files/${canonicalRelative(artifact.base_path)}`)) throw new BeaveError(`Package is missing published artifact: ${artifact.base_path}`);
+    if (!seen.has(workingEntry)) throw new PlangonautError(`Package is missing current artifact file: ${workingEntry}`);
+    if (sha256(fs.readFileSync(path.join(packageRoot, workingEntry))) !== artifact.content_hash) throw new PlangonautError(`Embedded artifact hash mismatch: ${artifact.id}`);
+    if (artifact.status === "PUBLISHED" && !seen.has(`files/${canonicalRelative(artifact.base_path)}`)) throw new PlangonautError(`Package is missing published artifact: ${artifact.base_path}`);
   }
   for (const evidence of embedded.evidence ?? []) {
-    if (!safeArtifactPath(evidence.path) || !seen.has(`files/${canonicalRelative(evidence.path)}`)) throw new BeaveError(`Package is missing or contains unsafe evidence: ${evidence.id}`);
+    if (!safeArtifactPath(evidence.path) || !seen.has(`files/${canonicalRelative(evidence.path)}`)) throw new PlangonautError(`Package is missing or contains unsafe evidence: ${evidence.id}`);
   }
   // Blocker 3. Same rule for the account of what was done about a human override:
   // the ledger carries a digest, so the package has to carry the document, and a
@@ -5818,14 +6546,14 @@ function packageManifest(packageRoot: string): any {
   for (const override of embedded.human_overrides ?? []) {
     const relative = override?.reconciliation_evidence;
     if (typeof relative !== "string" || !relative.trim()) continue;
-    if (!safeArtifactPath(relative)) throw new BeaveError(`Package carries an unsafe reconciliation evidence path for ${override.id}: ${relative}${reconciliationRecovery}`);
+    if (!safeArtifactPath(relative)) throw new PlangonautError(`Package carries an unsafe reconciliation evidence path for ${override.id}: ${relative}${reconciliationRecovery}`);
     const entry = `files/${canonicalRelative(relative)}`;
-    if (!seen.has(entry)) throw new BeaveError(`Package is missing the reconciliation evidence for ${override.id}: ${entry}${reconciliationRecovery}`);
+    if (!seen.has(entry)) throw new PlangonautError(`Package is missing the reconciliation evidence for ${override.id}: ${entry}${reconciliationRecovery}`);
     const digest = override.reconciliation_sha256;
     if (typeof digest === "string" && /^[a-f0-9]{64}$/.test(digest)) {
       const location = existingFileInside(packageRoot, entry);
-      if (!location) throw new BeaveError(`Package is missing the reconciliation evidence for ${override.id}: ${entry}${reconciliationRecovery}`);
-      if (sha256(fs.readFileSync(location)) !== digest) throw new BeaveError(`Reconciliation evidence digest mismatch for ${override.id}: ${entry} does not match the digest recorded in the ledger${reconciliationRecovery}`);
+      if (!location) throw new PlangonautError(`Package is missing the reconciliation evidence for ${override.id}: ${entry}${reconciliationRecovery}`);
+      if (sha256(fs.readFileSync(location)) !== digest) throw new PlangonautError(`Reconciliation evidence digest mismatch for ${override.id}: ${entry} does not match the digest recorded in the ledger${reconciliationRecovery}`);
     }
   }
   return manifest;
@@ -5839,17 +6567,35 @@ function packageManifest(packageRoot: string): any {
 // killed process left `.name.<uuid>.tmp` beside the destination and no command
 // would ever mention it again.
 //
-// The marker is what makes the directory recognisable as Beave's own. Nothing
+// The marker is what makes the directory recognisable as Plangonaut's own. Nothing
 // removes a directory that does not carry one -- a user's folder that happens to
 // look temporary is a user's folder.
 // ---------------------------------------------------------------------------
 
-const STAGING_MARKER = ".beave-staging.json";
+/**
+ * The names an unfinished piece of work leaves on disk.
+ *
+ * Every one of these is written by this engine and read back by it, sometimes
+ * across versions: a package exported by `0.2.x` has to import here, and a
+ * staging directory abandoned by a killed `0.2.x` process has to be recognised
+ * as abandoned rather than mistaken for a package. So the new spelling is what
+ * gets written, and both spellings are what gets read — which is the whole
+ * shape of this rename in one place.
+ */
+const STAGING_MARKER = ".plangonaut-staging.json";
+const LEGACY_STAGING_MARKER = ".beave-staging.json";
+const STAGING_FORMAT = "plangonaut-staging-v1";
+const STAGING_FORMATS = [STAGING_FORMAT, "beave-staging-v1"];
+const FILE_TRANSACTION_FORMAT = "plangonaut-file-transaction-v2";
+const FILE_TRANSACTION_FORMATS = [FILE_TRANSACTION_FORMAT, "beave-file-transaction-v2"];
+const PACKAGE_FORMAT = "plangonaut-project-package-v1";
+const PACKAGE_FORMATS = [PACKAGE_FORMAT, "beave-project-package-v1"];
+
 
 type StagingPhase = "OPENED" | "COPYING" | "MANIFEST" | "VERIFIED" | "PROMOTING";
 
 interface StagingMarker {
-  format: "beave-staging-v1";
+  format: string;
   kind: "export" | "import";
   staging_id: string;
   operation_id: string | null;
@@ -5865,8 +6611,19 @@ interface StagingMarker {
   expected_manifest_sha256: string | null;
 }
 
+/**
+ * The marker beside a staging directory, in whichever spelling wrote it.
+ *
+ * A staging directory abandoned by a killed `0.2.x` process carries the old
+ * name. Looking only for the new one would make that directory unrecognisable —
+ * and an unrecognised staging directory is offered to the user as a package,
+ * which is the one outcome this marker exists to prevent.
+ */
 function stagingMarkerPath(staging: string): string {
-  return path.join(staging, STAGING_MARKER);
+  const current = path.join(staging, STAGING_MARKER);
+  if (fs.existsSync(current)) return current;
+  const legacy = path.join(staging, LEGACY_STAGING_MARKER);
+  return fs.existsSync(legacy) ? legacy : current;
 }
 
 /**
@@ -5930,7 +6687,7 @@ function clearOwnAbandonedStagings(root: string): string[] {
        * The marker leaves just before the rename, so a crash in that window
        * leaves a directory with nothing inside it saying whose it is. The note
        * in this project's own `.beave/` is the provenance instead, and it is
-       * the stronger of the two: Beave wrote it, it names this exact path, and
+       * the stronger of the two: Plangonaut wrote it, it names this exact path, and
        * that path is not the destination. Without this the directory would sit
        * there for ever — which is the defect this whole section exists for.
        */
@@ -5996,7 +6753,7 @@ function openStaging(
   fs.mkdirSync(staging, { recursive: true });
   const at = now();
   writeTransientJson(stagingMarkerPath(staging), {
-    format: "beave-staging-v1",
+    format: STAGING_FORMAT,
     ...marker,
     phase: "OPENED" satisfies StagingPhase,
     pid: process.pid,
@@ -6023,18 +6780,18 @@ function readStagingMarker(staging: string): StagingMarker | null {
   if (!fs.existsSync(file)) return null;
   try {
     const value = readJson(file) as StagingMarker;
-    return value?.format === "beave-staging-v1" ? value : null;
+    return STAGING_FORMATS.includes(String(value?.format)) ? value : null;
   } catch {
     return null;
   }
 }
 
 /**
- * Beave's own abandoned staging directories beside a destination.
+ * Plangonaut's own abandoned staging directories beside a destination.
  *
  * Identified by the marker and by nothing else -- not by the name, not by the
  * extension. A directory without one is left exactly where it is and is not even
- * reported as Beave's, because it is not.
+ * reported as Plangonaut's, because it is not.
  */
 function abandonedStagings(parent: string, destination: string | null): Array<{ directory: string; marker: StagingMarker }> {
   if (!fs.existsSync(parent)) return [];
@@ -6082,18 +6839,18 @@ function resolveAbandonedStagings(parent: string, destination: string | null, re
       continue;
     }
     if (marker.host === os.hostname() && marker.pid !== process.pid && processIsAlive(marker.pid) !== false) {
-      throw new BeaveError(
-        `Another Beave ${marker.kind} is running against ${marker.destination}: process ${marker.pid} on ${marker.host}, since ${marker.created_at}. ` +
+      throw new PlangonautError(
+        `Another Plangonaut ${marker.kind} is running against ${marker.destination}: process ${marker.pid} on ${marker.host}, since ${marker.created_at}. ` +
           `Nothing was changed. Wait for it to finish, or stop that process.`,
       );
     }
     if (marker.host !== os.hostname()) {
-      throw new BeaveError(
-        `An unfinished Beave ${marker.kind} from another machine is beside this destination: ${path.basename(directory)}, from ${marker.host}, since ${marker.created_at}. ` +
-          `Beave cannot tell whether that machine is still working, so it will not remove it. Look at it, then delete it by hand and run this command again. Nothing was changed.`,
+      throw new PlangonautError(
+        `An unfinished Plangonaut ${marker.kind} from another machine is beside this destination: ${path.basename(directory)}, from ${marker.host}, since ${marker.created_at}. ` +
+          `Plangonaut cannot tell whether that machine is still working, so it will not remove it. Look at it, then delete it by hand and run this command again. Nothing was changed.`,
       );
     }
-    // This host, and the process is gone. The directory is Beave's own, it is
+    // This host, and the process is gone. The directory is Plangonaut's own, it is
     // incomplete by definition, and discarding it loses nothing that is not
     // still in the project it came from.
     fs.rmSync(directory, { recursive: true, force: true });
@@ -6126,7 +6883,7 @@ function projectExport(flags: Flags): void {
    */
   for (const note of clearOwnAbandonedStagings(root)) console.log(`Recovered: ${note}.`);
   for (const note of resolveAbandonedStagings(parent, destination, root)) console.log(`Recovered: ${note}.`);
-  if (fs.existsSync(destination)) throw new BeaveError(`Refusing to overwrite existing project package: ${destination}`);
+  if (fs.existsSync(destination)) throw new PlangonautError(`Refusing to overwrite existing project package: ${destination}`);
   const staging = path.join(parent, `.${path.basename(destination)}.${crypto.randomUUID()}.tmp`);
   const published = state.artifacts.filter((item) => item.status === "PUBLISHED" && item.base_path.toLowerCase().endsWith(".md"));
   // Blocker 6. This refusal named the rule and not the way out — the only engine
@@ -6149,7 +6906,7 @@ function projectExport(flags: Flags): void {
         `What you have: ${drafts.length} Markdown document${drafts.length === 1 ? "" : "s"} still in DRAFT — ${drafts.slice(0, 5).map((item) => `${item.id} (${item.base_path})`).join(", ")}${drafts.length > 5 ? ", …" : ""}.`,
         ``,
         `The safe action, for a document you have decided is ready:`,
-        `  beave doc-finalize --project-root . --id ${candidate.id} --owner <owner> --operation-id <id>`,
+        `  plangonaut doc-finalize --project-root . --id ${candidate.id} --owner <owner> --operation-id <id>`,
         ``,
         `That is the step that publishes ${candidate.base_path}; this command will not take it for you. Then re-run project-export.`,
       );
@@ -6158,9 +6915,9 @@ function projectExport(flags: Flags): void {
         `What you have: ${nonMarkdown.length} PUBLISHED document${nonMarkdown.length === 1 ? "" : "s"}, none of them Markdown — ${nonMarkdown.slice(0, 5).map((item) => `${item.id} (${item.base_path})`).join(", ")}${nonMarkdown.length > 5 ? ", …" : ""}.`,
         ``,
         `The safe action: record the handoff document as Markdown and publish it.`,
-        `  beave doc-diff --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner>`,
-        `  beave doc-save --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner> --confirm-token <token from doc-diff> --operation-id <id>`,
-        `  beave doc-finalize --project-root . --id ART-HANDOFF --owner <owner> --operation-id <id>`,
+        `  plangonaut doc-diff --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner>`,
+        `  plangonaut doc-save --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner> --confirm-token <token from doc-diff> --operation-id <id>`,
+        `  plangonaut doc-finalize --project-root . --id ART-HANDOFF --owner <owner> --operation-id <id>`,
         ``,
         `Then re-run project-export.`,
       );
@@ -6169,15 +6926,15 @@ function projectExport(flags: Flags): void {
         `What you have: no documents at all in the ledger.`,
         ``,
         `The safe action: write the handoff document, record it, then publish it.`,
-        `  beave doc-diff --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner>`,
-        `  beave doc-save --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner> --confirm-token <token from doc-diff> --operation-id <id>`,
-        `  beave doc-finalize --project-root . --id ART-HANDOFF --owner <owner> --operation-id <id>`,
+        `  plangonaut doc-diff --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner>`,
+        `  plangonaut doc-save --project-root . --id ART-HANDOFF --base-path docs/HANDOFF.md --content-file <file> --owner <owner> --confirm-token <token from doc-diff> --operation-id <id>`,
+        `  plangonaut doc-finalize --project-root . --id ART-HANDOFF --owner <owner> --operation-id <id>`,
         ``,
         `Then re-run project-export.`,
       );
     }
     lines.push(``, `Nothing was written and no document was published.`);
-    throw new BeaveError(lines.join("\n"));
+    throw new PlangonautError(lines.join("\n"));
   }
   const sources = new Map<string, string>();
   /*
@@ -6221,13 +6978,13 @@ function projectExport(flags: Flags): void {
     const reconciliation = (override as any).reconciliation_evidence;
     if (typeof reconciliation === "string" && reconciliation.trim()) {
       if (!safeArtifactPath(reconciliation)) {
-        throw new BeaveError(
-          `Override ${(override as any).id} records reconciliation evidence at ${reconciliation}, which cannot travel in the package: it is absolute, climbs out of the project with "..", or sits inside the reserved .beave directory.\n` +
+        throw new PlangonautError(
+          `Override ${(override as any).id} records reconciliation evidence at ${reconciliation}, which cannot travel in the package: it is absolute, climbs out of the project with "..", or sits inside the reserved .plangonaut directory.\n` +
           `A package must carry every document its ledger points at. Move the file inside the project, outside .beave, and record the reconciliation against it. Nothing was written.`
         );
       }
       if (!existingFileInside(root, reconciliation)) {
-        throw new BeaveError(
+        throw new PlangonautError(
           `Override ${(override as any).id} records reconciliation evidence at ${reconciliation}, and that file is missing from the project.\n` +
           `Restore it, then re-run project-export. A package that carried the digest without the document is exactly the defect this refusal exists for. Nothing was written.`
         );
@@ -6330,11 +7087,11 @@ function projectExport(flags: Flags): void {
       }
       const sourceRelative = path.relative(root, source);
       const confined = existingFileInside(root, sourceRelative);
-      if (!safeProjectRelative(relative) || !confined) throw new BeaveError(`Cannot package missing or unsafe file: ${relative}`);
+      if (!safeProjectRelative(relative) || !confined) throw new PlangonautError(`Cannot package missing or unsafe file: ${relative}`);
       // A history entry is one flat filename under `history/`. Anything with a
       // separator in it is not something this format produces.
       if (relative.startsWith("history/") && relative.slice("history/".length).includes("/")) {
-        throw new BeaveError(`Cannot package a nested history entry: ${relative}`);
+        throw new PlangonautError(`Cannot package a nested history entry: ${relative}`);
       }
       copyFileCreatingParents(confined, path.join(staging, relative));
       copied += 1;
@@ -6343,12 +7100,12 @@ function projectExport(flags: Flags): void {
       if (relative === "state/events.jsonl") faultPoint("staging-after-events");
       return { path: relative, sha256: sha256(fs.readFileSync(confined)), bytes: fs.statSync(confined).size };
     });
-    const entry = `# ${state.project.name}\n\nThis folder is a verified Beave project handoff.\n\n1. Read \`state/state.json\` and \`state/events.jsonl\`.\n2. Read the approved project documents under \`files/\`.\n3. Verify \`manifest.json\` before execution.\n4. Resume from the exact next action recorded in state.\n\nThe project's own entry point, wherever the state names it, takes precedence over this file: this one describes the package, not the project.\n\n\`history/\` holds the recorded document revisions as files. \`beave project-import\` puts them back under \`.beave/history/\`, so \`beave doc-restore\` brings an earlier revision back exactly as it did for whoever exported. \`beave doc-history\` will be **empty** for anything that happened before this package was made: it reads the event log, and the log this package carries begins at the moment of the export (see below). The revisions themselves are here; the account of who wrote each one, when, and from which sources stayed with the exporting project.\n\n## What this package's history is\n\n\`state/events.jsonl\` holds **one** event: the point at which this package was made, carrying the whole project state. Everything the project decided, asked, answered, recorded and published is in \`state/state.json\` and is complete; what is not here is the exporting project's own event-by-event log, because it recorded that project's absolute path on the machine that made it. \`manifest.json\` records the digest of that history, its length and its last event id, so the two can be matched later without either being disclosed.\n`;
+    const entry = `# ${state.project.name}\n\nThis folder is a verified Plangonaut project handoff.\n\n1. Read \`state/state.json\` and \`state/events.jsonl\`.\n2. Read the approved project documents under \`files/\`.\n3. Verify \`manifest.json\` before execution.\n4. Resume from the exact next action recorded in state.\n\nThe project's own entry point, wherever the state names it, takes precedence over this file: this one describes the package, not the project.\n\n\`history/\` holds the recorded document revisions as files. \`plangonaut project-import\` puts them back under \`.beave/history/\`, so \`plangonaut doc-restore\` brings an earlier revision back exactly as it did for whoever exported. \`plangonaut doc-history\` will be **empty** for anything that happened before this package was made: it reads the event log, and the log this package carries begins at the moment of the export (see below). The revisions themselves are here; the account of who wrote each one, when, and from which sources stayed with the exporting project.\n\n## What this package's history is\n\n\`state/events.jsonl\` holds **one** event: the point at which this package was made, carrying the whole project state. Everything the project decided, asked, answered, recorded and published is in \`state/state.json\` and is complete; what is not here is the exporting project's own event-by-event log, because it recorded that project's absolute path on the machine that made it. \`manifest.json\` records the digest of that history, its length and its last event id, so the two can be matched later without either being disclosed.\n`;
     atomicWrite(path.join(staging, "PROJECT_ENTRY.md"), entry);
     files.push({ path: "PROJECT_ENTRY.md", sha256: sha256(entry), bytes: Buffer.byteLength(entry) });
     files.sort((a, b) => a.path.localeCompare(b.path));
     const manifest = {
-      format: "beave-project-package-v1",
+      format: PACKAGE_FORMAT,
       created_at: now(),
       beave_version: VERSION,
       schema_version: state.schema_version,
@@ -6428,9 +7185,9 @@ function refuseUnpromotedStaging(directory: string, verb: string): void {
   const marker = readStagingMarker(directory);
   if (!marker) return;
   if (path.resolve(marker.destination) === path.resolve(directory)) return;
-  throw new BeaveError(
-    `${path.basename(directory)} is a Beave staging directory, not a package: it carries ${STAGING_MARKER}, which says the ${marker.kind} that was building it never finished (phase ${marker.phase}, started ${marker.created_at}).\n` +
-      `Beave will not ${verb} an unfinished package. Re-run the export that was interrupted; nothing was changed.`,
+  throw new PlangonautError(
+    `${path.basename(directory)} is a Plangonaut staging directory, not a package: it carries ${STAGING_MARKER}, which says the ${marker.kind} that was building it never finished (phase ${marker.phase}, started ${marker.created_at}).\n` +
+      `Plangonaut will not ${verb} an unfinished package. Re-run the export that was interrupted; nothing was changed.`,
   );
 }
 
@@ -6441,7 +7198,7 @@ function refuseUnpromotedStaging(directory: string, verb: string): void {
  * recipient runs and not the command that acts. A third independent review put a
  * rogue file in seven positions and got a refusal seven times from
  * `project-verify` and `Imported and resumed …` seven times from
- * `project-import`, followed by `Beave state is valid.` — the trust boundary
+ * `project-import`, followed by `Plangonaut state is valid.` — the trust boundary
  * checked by the advisory command and not by the one that crosses it.
  *
  * The staging marker is the single file allowed to be here undeclared, and only
@@ -6455,7 +7212,7 @@ function refuseUndeclaredPackageFiles(packageRoot: string, manifest: any, leftov
     (relative) => relative !== "manifest.json" && !declared.has(relative) && !(leftoverMarker && relative === STAGING_MARKER),
   );
   if (!unexpected.length) return;
-  throw new BeaveError(
+  throw new PlangonautError(
     `The package holds ${unexpected.length} file${unexpected.length === 1 ? "" : "s"} its manifest does not declare: ${unexpected.slice(0, 8).join(", ")}${unexpected.length > 8 ? ", …" : ""}.\n` +
       `A handoff is what the manifest says it is. Something was added after the export, or the export was not made by this engine. Nothing was changed.`,
   );
@@ -6499,12 +7256,12 @@ function refuseContradictoryAttestation(packageRoot: string, manifest: any): voi
     let event: any = null;
     try { event = JSON.parse(line); } catch { event = null; }
     if (!event) {
-      throw new BeaveError(`Line ${index + 1} of the package's state/events.jsonl is not JSON. A package whose ledger cannot be read is not a package; nothing was changed.`);
+      throw new PlangonautError(`Line ${index + 1} of the package's state/events.jsonl is not JSON. A package whose ledger cannot be read is not a package; nothing was changed.`);
     }
     if (typeof event.payload_sha256 !== "string") continue;
     const recomputed = digestOf({ ...event, payload_sha256: undefined });
     if (recomputed !== event.payload_sha256) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `Line ${index + 1} (${event.type ?? "an event"}) of the package's ledger does not match the digest it records of itself. The event was edited after it was written. Nothing was changed.`,
       );
     }
@@ -6529,7 +7286,7 @@ function refuseContradictoryAttestation(packageRoot: string, manifest: any): voi
    */
   if (!declared) {
     if (origin?.type === "PROJECT_PACKAGE_EXPORTED") {
-      throw new BeaveError(
+      throw new PlangonautError(
         `This package's ledger begins with a ${origin.type} event, so it was made by an engine that replaces the exporting project's history with a portable origin — and its manifest declares no \`history_transform\` to say what it replaced.\n` +
           `That declaration is the only thing a recipient can match this package against the history it came from, and a package that drops it cannot be told from one that never had it. Nothing was changed.`,
       );
@@ -6538,13 +7295,13 @@ function refuseContradictoryAttestation(packageRoot: string, manifest: any): voi
   }
 
   if (!origin || origin.type !== declared.origin_event_type || origin.event_id !== declared.origin_event_id) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `The manifest declares a history transformation whose origin event is not the first event in state/events.jsonl. The package contradicts itself; nothing was changed.`,
     );
   }
   for (const field of ["source_history_sha256", "source_event_count", "source_last_event_id", "source_state_revision"]) {
     if (String(origin[field] ?? "") !== String(declared[field] ?? "")) {
-      throw new BeaveError(
+      throw new PlangonautError(
         `The manifest and the package's own origin event disagree about \`${field}\`: the manifest says ${JSON.stringify(declared[field])} and the event says ${JSON.stringify(origin[field])}.\n` +
           `That field is how this package is matched against the history it was made from, so the disagreement matters. Nothing was changed.`,
       );
@@ -6572,10 +7329,10 @@ function projectVerify(flags: Flags): void {
    */
   if (readStagingMarker(packageRoot) !== null) {
     const marker = readStagingMarker(packageRoot)!;
-    throw new BeaveError(
+    throw new PlangonautError(
       `This package carries ${STAGING_MARKER}, left by an export that was interrupted after the package was complete (phase ${marker.phase}, started ${marker.created_at}).\n` +
         `It is not a file the manifest declares and it records the exporting machine — its paths, its hostname, the process that made it — so this package must not be handed to anybody as it stands.\n` +
-        `On the machine that exported it: \`beave recover --project-root <the exporting project> --apply\`, or simply run the export again. Either removes it. Nothing was changed here.`,
+        `On the machine that exported it: \`plangonaut recover --project-root <the exporting project> --apply\`, or simply run the export again. Either removes it. Nothing was changed here.`,
     );
   }
   refuseUndeclaredPackageFiles(packageRoot, manifest, false);
@@ -6590,9 +7347,9 @@ function projectImport(flags: Flags): void {
   // The checks `project-verify` makes, made by the command that acts on the
   // answer rather than only by the one that reports it.
   if (readStagingMarker(packageRoot) !== null) {
-    throw new BeaveError(
+    throw new PlangonautError(
       `This package carries ${STAGING_MARKER} from an interrupted export, which records the exporting machine's paths, hostname and process id.\n` +
-        `Have it cleared where it was made — \`beave recover --project-root <the exporting project> --apply\`, or a re-run of the export — and import the package after that. Nothing was written.`,
+        `Have it cleared where it was made — \`plangonaut recover --project-root <the exporting project> --apply\`, or a re-run of the export — and import the package after that. Nothing was written.`,
     );
   }
   refuseUndeclaredPackageFiles(packageRoot, manifest, false);
@@ -6609,10 +7366,13 @@ function projectImport(flags: Flags): void {
    * it after the same reasoning had already been applied one line further down.
    */
   for (const note of resolveAbandonedStagings(path.dirname(root), root, null)) console.log(`Recovered: ${note}.`);
-  if (fs.existsSync(path.join(root, ".beave", "events.jsonl")) && checkIdempotency(root, key)) return console.log(`Idempotent retry: project import already applied.`);
+  // Through `stateRoot`, not a literal: an import into a legacy project has to
+  // find that project's own history, and this was the one path in the file that
+  // would have looked in the wrong directory for it.
+  if (fs.existsSync(path.join(stateRoot(root), "events.jsonl")) && checkIdempotency(root, key)) return console.log(`Idempotent retry: project import already applied.`);
   const parent = path.dirname(root);
   fs.mkdirSync(parent, { recursive: true });
-  if (fs.existsSync(root) && (!fs.statSync(root).isDirectory() || fs.readdirSync(root).length)) throw new BeaveError(`Import destination must be a new or empty directory: ${root}`);
+  if (fs.existsSync(root) && (!fs.statSync(root).isDirectory() || fs.readdirSync(root).length)) throw new PlangonautError(`Import destination must be a new or empty directory: ${root}`);
   const staging = path.join(parent, `.${path.basename(root)}.${crypto.randomUUID()}.tmp`);
   const destinationExisted = fs.existsSync(root);
   let projectName = manifest.project_name;
@@ -6648,7 +7408,7 @@ function projectImport(flags: Flags): void {
     stagedState.project.root = staging;
     const stagedErrors = stateErrors(staging, stagedState);
     if (!stagedErrors.length) stagedErrors.push(...documentIntegrityErrors(staging, stagedState));
-    if (stagedErrors.length) throw new BeaveError(`Imported package state failed validation:\n- ${stagedErrors.join("\n- ")}`);
+    if (stagedErrors.length) throw new PlangonautError(`Imported package state failed validation:\n- ${stagedErrors.join("\n- ")}`);
 
     const timestamp = now();
     const eventId = crypto.randomUUID();
@@ -6673,7 +7433,7 @@ function projectImport(flags: Flags): void {
     validationState.project.root = staging;
     const finalErrors = stateErrors(staging, validationState, event);
     if (!finalErrors.length) finalErrors.push(...documentIntegrityErrors(staging, validationState));
-    if (finalErrors.length) throw new BeaveError(`Final imported project failed validation:\n- ${finalErrors.join("\n- ")}`);
+    if (finalErrors.length) throw new PlangonautError(`Final imported project failed validation:\n- ${finalErrors.join("\n- ")}`);
 
     stagingPhase(staging, "VERIFIED");
     faultPoint("staging-after-verify");
@@ -6828,13 +7588,13 @@ function migrate(flags: Flags): void {
   }
 
   if (rawState.schema_version !== 1 && rawState.schema_version !== 2) {
-    throw new BeaveError(`No migration path from schema_version=${rawState.schema_version}`);
+    throw new PlangonautError(`No migration path from schema_version=${rawState.schema_version}`);
   }
 
   const fromSchema = rawState.schema_version;
   const legacy = rawState.interaction_mode;
   rawState.interaction_mode = ({ Batch: "Standard", "Brief-led": "Standard" } as any)[legacy] ?? legacy;
-  if (!INTERACTION_MODES.has(rawState.interaction_mode)) throw new BeaveError(`Unknown legacy interaction mode: ${legacy}`);
+  if (!INTERACTION_MODES.has(rawState.interaction_mode)) throw new PlangonautError(`Unknown legacy interaction mode: ${legacy}`);
   
   const revision = Number(rawState.revision || 0) + 1;
   const eventId = crypto.randomUUID();
@@ -6871,17 +7631,17 @@ function migrate(flags: Flags): void {
   const rewrites = normalizeRecordedSeparators(rawState);
   const event = { event_id: eventId, type: "STATE_MIGRATED", state_revision: revision, at: rawState.updated_at, from_schema: fromSchema, to_schema: SCHEMA_VERSION, legacy_interaction_mode: legacy, idempotency_key: key, separator: "/", path_rewrites: rewrites };
   commitState(root, location, rawState, event);
-  console.log(`Migrated Beave state to schema ${SCHEMA_VERSION}.`);
+  console.log(`Migrated Plangonaut state to schema ${SCHEMA_VERSION}.`);
 }
 
 function historyLocation(root: string, artifact: Artifact, revision: number): string {
   return path.join(stateRoot(root), "history", `${artifact.id}-v${revision}${path.parse(artifact.base_path).ext}`);
 }
 
-// Every digest Beave has ever produced for this artifact: the hashes recorded in
+// Every digest Plangonaut has ever produced for this artifact: the hashes recorded in
 // the ledger plus whatever is preserved under `.beave/history/`. Content matching
-// one of them is a Beave publication and may be replaced; anything else is content
-// Beave never wrote, and overwriting it is irreversible because `.beave/backups/`
+// one of them is a Plangonaut publication and may be replaced; anything else is content
+// Plangonaut never wrote, and overwriting it is irreversible because `.beave/backups/`
 // only ever holds state.json and events.jsonl, never document bytes.
 function recordedDigests(root: string, artifactId: string): Set<string> {
   const digests = new Set<string>();
@@ -6912,7 +7672,7 @@ function assertNoExternalEdit(root: string, artifact: Artifact): void {
   const current = resolveRecorded(root, artifact.working_path);
   if (!fs.existsSync(current)) return;
   if (sha256(fs.readFileSync(current, "utf8")) !== artifact.content_hash) {
-    throw new BeaveError(`External edit detected on ${artifact.working_path}. Hashes do not match. Reconcile manually.`);
+    throw new PlangonautError(`External edit detected on ${artifact.working_path}. Hashes do not match. Reconcile manually.`);
   }
 }
 
@@ -6933,7 +7693,7 @@ function archiveCurrentRevision(root: string, artifact: Artifact): void {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (fs.existsSync(target)) {
     if (sha256(fs.readFileSync(target)) !== sha256(fs.readFileSync(current))) {
-      throw new BeaveError(`History for ${artifact.id} revision ${artifact.revision} already exists with different content at ${path.relative(root, target).replaceAll("\\", "/")}. Refusing to overwrite recorded history.`);
+      throw new PlangonautError(`History for ${artifact.id} revision ${artifact.revision} already exists with different content at ${path.relative(root, target).replaceAll("\\", "/")}. Refusing to overwrite recorded history.`);
     }
     if (!publishedBase) fs.rmSync(current);
     return;
@@ -6944,7 +7704,7 @@ function archiveCurrentRevision(root: string, artifact: Artifact): void {
 
 // The ledger already records the hash of every saved and restored revision, but
 // nothing ever compared it with the bytes on disk: damage was provable and never
-// proved. `beave validate` now performs that comparison.
+// proved. `plangonaut validate` now performs that comparison.
 function documentIntegrityErrors(root: string, state: State): string[] {
   const errors: string[] = [];
   if (!Array.isArray(state.artifacts) || !state.artifacts.length) return errors;
@@ -6973,7 +7733,7 @@ function documentIntegrityErrors(root: string, state: State): string[] {
     if (artifact.working_path) {
       const current = resolveRecorded(root, artifact.working_path);
       if (!fs.existsSync(current)) errors.push(`working file ${artifact.working_path} for ${artifact.id} is missing`);
-      else if (sha256(fs.readFileSync(current, "utf8")) !== artifact.content_hash) errors.push(`External edit detected: working file ${artifact.working_path} for ${artifact.id} was edited outside Beave`);
+      else if (sha256(fs.readFileSync(current, "utf8")) !== artifact.content_hash) errors.push(`External edit detected: working file ${artifact.working_path} for ${artifact.id} was edited outside Plangonaut`);
     }
     if (artifact.status === "PUBLISHED" && !fs.existsSync(resolveRecorded(root, artifact.base_path))) {
       errors.push(`${artifact.id} is recorded as PUBLISHED but ${artifact.base_path} does not exist`);
@@ -7038,7 +7798,7 @@ function documentPreview(root: string, state: State, flags: Flags): any {
   // A path the save cannot accept must not preview cleanly. `stateErrors` rejects
   // an unsafe `base_path` at commit time, so the save was refused either way —
   // but only after the user had reviewed a diff and confirmed it.
-  if (!safeArtifactPath(basePath)) blockers.push(`Artifact path must stay inside the project and outside the reserved .beave directory: ${basePath}`);
+  if (!safeArtifactPath(basePath)) blockers.push(`Artifact path must stay inside the project and outside the reserved .plangonaut directory: ${basePath}`);
   let current = "";
   if (artifact) {
     if (!sameRecordedPath(artifact.base_path, basePath)) blockers.push(`Artifact ${id} base_path mismatch. Expected ${artifact.base_path}`);
@@ -7104,19 +7864,19 @@ function docMarkDeletion(flags: Flags): void {
   const id = required(flags, "id").toUpperCase();
   const owner = required(flags, "owner");
   const artifact = state.artifacts.find((item) => item.id === id);
-  if (!artifact) throw new BeaveError(`Artifact ${id} not found.`);
-  if (artifact.lock_owner && artifact.lock_owner !== owner) throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+  if (!artifact) throw new PlangonautError(`Artifact ${id} not found.`);
+  if (artifact.lock_owner && artifact.lock_owner !== owner) throw new PlangonautError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
   assertNoExternalEdit(root, artifact);
   const stale = expectedArtifactErrors(flags, artifact);
-  if (stale.length) throw new BeaveError(`Deletion intent refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
+  if (stale.length) throw new PlangonautError(`Deletion intent refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
   const target = required(flags, "target").trim();
-  if (!target) throw new BeaveError(`--target cannot be empty`);
+  if (!target) throw new PlangonautError(`--target cannot be empty`);
   const reasonPath = path.resolve(required(flags, "reason-file"));
   const reasonRelative = path.relative(root, reasonPath);
   const confinedReason = existingFileInside(root, reasonRelative);
-  if (!confinedReason) throw new BeaveError(`Deletion reason must be an existing file inside the project root`);
+  if (!confinedReason) throw new PlangonautError(`Deletion reason must be an existing file inside the project root`);
   const reason = fs.readFileSync(confinedReason);
-  if (!reason.length || !reason.toString("utf8").trim()) throw new BeaveError(`Deletion reason cannot be empty`);
+  if (!reason.length || !reason.toString("utf8").trim()) throw new PlangonautError(`Deletion reason cannot be empty`);
   const candidatePath = path.resolve(required(flags, "content-file"));
   const candidate = fs.readFileSync(candidatePath, "utf8");
   const candidateHash = sha256(candidate);
@@ -7182,14 +7942,14 @@ function docSave(flags: Flags): void {
   // is unchanged: no save is applied without a matching confirmation. Only the
   // order in which the user is told what is wrong has changed.
   if (artifact) {
-    if (!sameRecordedPath(artifact.base_path, basePath)) throw new BeaveError(`Artifact ${id} base_path mismatch. Expected ${artifact.base_path}`);
-    if (artifact.lock_owner && artifact.lock_owner !== owner) throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+    if (!sameRecordedPath(artifact.base_path, basePath)) throw new PlangonautError(`Artifact ${id} base_path mismatch. Expected ${artifact.base_path}`);
+    if (artifact.lock_owner && artifact.lock_owner !== owner) throw new PlangonautError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
     assertNoExternalEdit(root, artifact);
   }
   const stale = expectedArtifactErrors(flags, artifact);
-  if (stale.length) throw new BeaveError(`Document save refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
+  if (stale.length) throw new PlangonautError(`Document save refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
   const expectedToken = previewConfirmationToken(id, basePath, owner, sourceRevision, sourceHash, hash);
-  if (flags["confirm-token"] !== expectedToken) throw new BeaveError(`Document save refused: run doc-diff and pass its confirmation_token with --confirm-token. No changes written.`);
+  if (flags["confirm-token"] !== expectedToken) throw new PlangonautError(`Document save refused: run doc-diff and pass its confirmation_token with --confirm-token. No changes written.`);
   const diff = documentPreview(root, state, { ...flags, id }).diff;
   if (!artifact) {
     artifact = {
@@ -7205,10 +7965,10 @@ function docSave(flags: Flags): void {
     state.artifacts.push(artifact);
   } else {
     if (!sameRecordedPath(artifact.base_path, basePath)) {
-      throw new BeaveError(`Artifact ${id} base_path mismatch. Expected ${artifact.base_path}`);
+      throw new PlangonautError(`Artifact ${id} base_path mismatch. Expected ${artifact.base_path}`);
     }
     if (artifact.lock_owner && artifact.lock_owner !== owner) {
-      throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+      throw new PlangonautError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
     }
     assertNoExternalEdit(root, artifact);
   }
@@ -7217,7 +7977,7 @@ function docSave(flags: Flags): void {
   const parsedPath = path.parse(basePath);
   const newWorkingPath = path.posix.join(parsedPath.dir, `${parsedPath.name}-v${newRevision}${parsedPath.ext}`);
   const absoluteNewWorkingPath = boundedOutput(root, newWorkingPath);
-  if (fs.existsSync(absoluteNewWorkingPath) && absoluteNewWorkingPath !== resolveRecorded(root, artifact.working_path || "")) throw new BeaveError(`Refusing to overwrite untracked working file ${newWorkingPath}`);
+  if (fs.existsSync(absoluteNewWorkingPath) && absoluteNewWorkingPath !== resolveRecorded(root, artifact.working_path || "")) throw new PlangonautError(`Refusing to overwrite untracked working file ${newWorkingPath}`);
 
   artifact.working_path = newWorkingPath;
   artifact.revision = newRevision;
@@ -7291,12 +8051,12 @@ function docRestore(flags: Flags): void {
   const owner = required(flags, "owner");
   
   const artifact = state.artifacts.find(a => a.id === id);
-  if (!artifact) throw new BeaveError(`Artifact ${id} not found.`);
+  if (!artifact) throw new PlangonautError(`Artifact ${id} not found.`);
   const stale = expectedArtifactErrors(flags, artifact);
-  if (stale.length) throw new BeaveError(`Document restore refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
+  if (stale.length) throw new PlangonautError(`Document restore refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
   
   if (artifact.lock_owner && artifact.lock_owner !== owner) {
-    throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+    throw new PlangonautError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
   }
   
   assertNoExternalEdit(root, artifact);
@@ -7305,7 +8065,7 @@ function docRestore(flags: Flags): void {
   const historyFile = historyLocation(root, artifact, restoreRevision);
   
   if (!fs.existsSync(historyFile)) {
-    throw new BeaveError(`History file for revision ${restoreRevision} not found.`);
+    throw new PlangonautError(`History file for revision ${restoreRevision} not found.`);
   }
   
   const content = fs.readFileSync(historyFile, "utf8");
@@ -7314,7 +8074,7 @@ function docRestore(flags: Flags): void {
   const newRevision = artifact.revision + 1;
   const newWorkingPath = path.posix.join(parsedPath.dir, `${parsedPath.name}-v${newRevision}${parsedPath.ext}`);
   const absoluteNewWorkingPath = boundedOutput(root, newWorkingPath);
-  if (fs.existsSync(absoluteNewWorkingPath)) throw new BeaveError(`Refusing to overwrite untracked working file ${newWorkingPath}`);
+  if (fs.existsSync(absoluteNewWorkingPath)) throw new PlangonautError(`Refusing to overwrite untracked working file ${newWorkingPath}`);
   const priorArtifact = { ...artifact, provenance: [...(artifact.provenance ?? [])] };
 
   artifact.working_path = newWorkingPath;
@@ -7356,20 +8116,20 @@ function docFinalize(flags: Flags): void {
   const owner = required(flags, "owner");
   
   const artifact = state.artifacts.find(a => a.id === id);
-  if (!artifact) throw new BeaveError(`Artifact ${id} not found.`);
+  if (!artifact) throw new PlangonautError(`Artifact ${id} not found.`);
   const stale = expectedArtifactErrors(flags, artifact);
-  if (stale.length) throw new BeaveError(`Document finalize refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
+  if (stale.length) throw new PlangonautError(`Document finalize refused:\n- ${stale.join("\n- ")}\nNo changes written.`);
   
   if (artifact.lock_owner && artifact.lock_owner !== owner) {
-    throw new BeaveError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
+    throw new PlangonautError(`Artifact ${id} is locked by ${artifact.lock_owner}`);
   }
   if (!artifact.working_path) {
-    throw new BeaveError(`Artifact ${id} has no working path to finalize.`);
+    throw new PlangonautError(`Artifact ${id} has no working path to finalize.`);
   }
   // Already published: working_path === base_path, so the previous code copied
   // the file onto itself and then moved it into history, deleting the publication.
   if (artifact.working_path === artifact.base_path) {
-    throw new BeaveError(`Artifact ${id} is already finalized at ${artifact.base_path}. Save a new revision before finalizing again.`);
+    throw new PlangonautError(`Artifact ${id} is already finalized at ${artifact.base_path}. Save a new revision before finalizing again.`);
   }
 
   assertNoExternalEdit(root, artifact);
@@ -7378,11 +8138,11 @@ function docFinalize(flags: Flags): void {
   const absoluteBase = boundedOutput(root, artifact.base_path);
 
   if (!fs.existsSync(absoluteWorking)) {
-    throw new BeaveError(`Working file ${absoluteWorking} does not exist.`);
+    throw new PlangonautError(`Working file ${absoluteWorking} does not exist.`);
   }
 
   // DOCOP-001, "Finalization": the audit "reports suspected accidental loss before
-  // writing". The base file can hold content Beave never produced: a document that
+  // writing". The base file can hold content Plangonaut never produced: a document that
   // predates the project, or a hand edit made while the artifact was in DRAFT,
   // which assertNoExternalEdit cannot see because it guards the working file.
   // Overwriting it is irreversible, so it is refused unless the human approves.
@@ -7394,7 +8154,7 @@ function docFinalize(flags: Flags): void {
     const baseHash = sha256(fs.readFileSync(absoluteBase, "utf8"));
     if (!recordedDigests(root, id).has(baseHash)) {
       if (!flags["accept-base-overwrite"]) {
-        throw new BeaveError(`${artifact.base_path} already holds content Beave never recorded (sha256 ${baseHash}). Finalizing would overwrite it and no document backup exists. Import it with doc-save, move it aside, or re-run with --accept-base-overwrite to archive it under .beave/history/ first.`);
+        throw new PlangonautError(`${artifact.base_path} already holds content Plangonaut never recorded (sha256 ${baseHash}). Finalizing would overwrite it and no document backup exists. Import it with doc-save, move it aside, or re-run with --accept-base-overwrite to archive it under ${locateState(root).name}/history/ first.`);
       }
       const stamp = new Date().toISOString().replaceAll(":", "").replaceAll(".", "");
       const snapshot = path.join(stateRoot(root), "history", `${id}-external-${stamp}${path.parse(artifact.base_path).ext}`);
@@ -7436,7 +8196,7 @@ function docFinalize(flags: Flags): void {
 
 function portableMarkdown(): string {
   const paths = [path.join(SKILL_ROOT, "SKILL.md"), ...fs.readdirSync(path.join(SKILL_ROOT, "references")).filter((name: string) => name.endsWith(".md")).sort().map((name: string) => path.join(SKILL_ROOT, "references", name))];
-  const sections = ["<!-- Generated by Beave. Edit canonical sources, not this file. -->", `<!-- Beave version: ${VERSION} -->`, "# Beave — Portable Semantic Edition", "", "Use this document when the AI runtime cannot install or execute the Beave skill. Follow the same human gates and preserve the final state block manually.", ""];
+  const sections = ["<!-- Generated by Plangonaut. Edit canonical sources, not this file. -->", `<!-- Plangonaut version: ${VERSION} -->`, "# Plangonaut — Portable Semantic Edition", "", "Use this document when the AI runtime cannot install or execute the Plangonaut skill. Follow the same human gates and preserve the final state block manually.", ""];
   for (const source of paths) {
     let text = fs.readFileSync(source, "utf8");
     if (path.basename(source) === "SKILL.md" && text.startsWith("---")) text = text.split("---", 3)[2].trimStart();
@@ -7447,16 +8207,16 @@ function portableMarkdown(): string {
 }
 
 function adapterRelative(target: string): string {
-  if (["codex", "gemini", "agy"].includes(target)) return path.join(".agents", "skills", "beave");
-  if (target === "claude") return path.join(".claude", "skills", "beave");
-  throw new BeaveError(`Unsupported target: ${target}`);
+  if (["codex", "gemini", "agy"].includes(target)) return path.join(".agents", "skills", "plangonaut");
+  if (target === "claude") return path.join(".claude", "skills", "plangonaut");
+  throw new PlangonautError(`Unsupported target: ${target}`);
 }
 
 function copySkill(destination: string, target: string): void {
-  if (fs.existsSync(destination)) throw new BeaveError(`Destination already exists: ${destination}`);
+  if (fs.existsSync(destination)) throw new PlangonautError(`Destination already exists: ${destination}`);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.cpSync(SKILL_ROOT, destination, { recursive: true });
-  writeJson(path.join(destination, "beave-adapter.json"), { generated_by: `beave ${VERSION}`, target, generated_at: now(), canonical_source_sha256: canonicalSourceDigest() });
+  writeJson(path.join(destination, "plangonaut-adapter.json"), { generated_by: `plangonaut ${VERSION}`, target, generated_at: now(), canonical_source_sha256: canonicalSourceDigest() });
 }
 
 function installedSourceDigest(destination: string): string {
@@ -7465,7 +8225,7 @@ function installedSourceDigest(destination: string): string {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(full);
-      else if (entry.name !== "beave-adapter.json") files.push(full);
+      else if (entry.name !== "plangonaut-adapter.json") files.push(full);
     }
   };
   visit(destination);
@@ -7487,25 +8247,25 @@ function installedSourceDigest(destination: string): string {
 function verifyInstall(flags: Flags): void {
   const target = required(flags, "target");
   const scope = typeof flags.scope === "string" ? flags.scope : "project";
-  if (!new Set(["project", "workspace", "user"]).has(scope)) throw new BeaveError("--scope must be project, workspace, or user");
+  if (!new Set(["project", "workspace", "user"]).has(scope)) throw new PlangonautError("--scope must be project, workspace, or user");
   const base = scope === "user" ? os.homedir() : path.resolve((typeof flags["project-root"] === "string" ? flags["project-root"] : undefined) ?? process.cwd());
   const destination = path.join(base, adapterRelative(target));
   
   if (!fs.existsSync(destination)) {
-    throw new BeaveError(`Target ${target} is not installed at ${destination}`);
+    throw new PlangonautError(`Target ${target} is not installed at ${destination}`);
   }
-  const manifestFile = path.join(destination, "beave-adapter.json");
+  const manifestFile = path.join(destination, "plangonaut-adapter.json");
   if (!fs.existsSync(manifestFile)) {
-    throw new BeaveError(`Missing beave-adapter.json in ${destination}`);
+    throw new PlangonautError(`Missing plangonaut-adapter.json in ${destination}`);
   }
   const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
   if (!manifest.canonical_source_sha256) {
-    throw new BeaveError(`beave-adapter.json lacks canonical_source_sha256`);
+    throw new PlangonautError(`plangonaut-adapter.json lacks canonical_source_sha256`);
   }
   
   const currentDigest = installedSourceDigest(destination);
   if (currentDigest !== manifest.canonical_source_sha256) {
-    throw new BeaveError(`Drift detected in installed skill at ${destination}. Hashes do not match.`);
+    throw new PlangonautError(`Drift detected in installed skill at ${destination}. Hashes do not match.`);
   }
   console.log(`Installation for ${target} at ${destination} is pristine and matches original source.`);
 }
@@ -7515,8 +8275,8 @@ function exportTarget(flags: Flags): void {
   const outputRoot = path.resolve(required(flags, "output-dir"));
   fs.mkdirSync(outputRoot, { recursive: true });
   if (target === "portable") {
-    const destination = path.join(outputRoot, "beave-portable.md");
-    if (fs.existsSync(destination)) throw new BeaveError(`Destination already exists: ${destination}`);
+    const destination = path.join(outputRoot, "plangonaut-portable.md");
+    if (fs.existsSync(destination)) throw new PlangonautError(`Destination already exists: ${destination}`);
     atomicWrite(destination, portableMarkdown());
     return console.log(`Exported portable to ${destination}`);
   }
@@ -7528,27 +8288,728 @@ function exportTarget(flags: Flags): void {
 function install(flags: Flags): void {
   const target = required(flags, "target");
   const scope = typeof flags.scope === "string" ? flags.scope : "project";
-  if (!new Set(["project", "workspace", "user"]).has(scope)) throw new BeaveError("--scope must be project, workspace, or user");
+  if (!new Set(["project", "workspace", "user"]).has(scope)) throw new PlangonautError("--scope must be project, workspace, or user");
   const base = scope === "user" ? os.homedir() : path.resolve((typeof flags["project-root"] === "string" ? flags["project-root"] : undefined) ?? process.cwd());
   const targets = target === "all" ? ["codex", "claude"] : [target];
   const destinations = targets.map((item) => ({ item, destination: path.join(base, adapterRelative(item)) }));
-  for (const { destination } of destinations) if (fs.existsSync(destination)) throw new BeaveError(`Refusing to overwrite existing skill: ${destination}`);
+  for (const { destination } of destinations) if (fs.existsSync(destination)) throw new PlangonautError(`Refusing to overwrite existing skill: ${destination}`);
   for (const { item, destination } of destinations) {
     console.log(`${flags["dry-run"] ? "Would install" : "Installing"} ${item} skill at ${destination}`);
     if (!flags["dry-run"]) copySkill(destination, item);
   }
-  if (target === "all") console.log("Codex and Gemini share .agents/skills/beave; no duplicate Gemini copy was created.");
+  if (target === "all") console.log("Codex and Gemini share .agents/skills/plangonaut; no duplicate Gemini copy was created.");
 }
 
 function help(): void {
   console.log("Mutation requirements: pass --operation-id OP-ID to every mutating command. For doc-save, first run doc-diff and pass its confirmation_token as --confirm-token TOKEN.\n");
-  console.log(`Beave ${VERSION}\n\nUsage: beave <command> [options]\n\nEvery command that changes the project requires --operation-id <unique-id>, 3 to 128\ncharacters. It is how a retried command is recognised as the same operation rather\nthan applied twice, so it is required rather than generated, and it is omitted from\nthe lines below only because it belongs to all of them.\n\nThe first command needs an owners file. It is one JSON object with these five keys,\neach naming the person accountable for that kind of decision:\n\n  {\"product\":\"Ada\",\"technical\":\"Ada\",\"budget\":\"Ada\",\"safety\":\"Ada\",\"release\":\"Ada\"}\n\nSave it anywhere and pass its path to --owners-file; the same person may hold more\nthan one role. An unknown key is refused, and so is a missing or empty one. What the\nroles mean, and when they matter, is in skills/beave/references/user-guide.md.\n\nCommands:\n  capabilities\n  init --project-root . --project-name NAME --project-mode Resume --interaction-mode Standard --owners-file owners.json\n  status --project-root .\n  next --project-root . [--count 1|2|3]\n  resume --project-root .\n  record --project-root . --module N --status CONFIRMED --answer-file FILE --owner NAME\n  decision --project-root . --id DEC-ID --title TEXT --status APPROVED --owner NAME [--expected-revision N]\n  requirement --project-root . --id REQ-ID --title TEXT --status ACTIVE --owner NAME [--expected-revision N]\n  task --project-root . --id TSK-ID --title TEXT --status READY --owner NAME [--expected-revision N]\n  dependency --project-root . --id DEP-ID --from REQ-ID --to TSK-ID --type REQUIRES --owner NAME [--expected-revision N]\n  risk --project-root . --id RSK-ID --title TEXT --severity HIGH --status IDENTIFIED --owner NAME [--expected-revision N]\n  evidence --project-root . --id EVD-ID --file FILE --owner NAME [--expected-revision N]\n  agent --project-root . --id AGT-ID --name TEXT --status ACTIVE --owner NAME [--expected-revision N]\n  checkpoint --project-root . --id CHK-ID --name TEXT --owner NAME [--next-action TEXT] [--expected-revision N]\n  override --project-root . --instruction-file FILE --owner NAME [--reason TEXT]\n  re-record --project-root . --kind override|gate --id OVR-ID|G2 --source-file FILE --owner NAME --reason TEXT\n  reconcile --project-root . --override-id ID --evidence-file FILE --owner NAME [--next-action TEXT] [--replace-human-next-action]\n  forecast --project-root . --owner NAME --phase TEXT --known-work TEXT --conditional-work TEXT --questions MIN-MAX --operations MIN-MAX --cycles MIN-MAX --confidence ALTA|MEDIA|BASSA --confidence-reason TEXT --cycle-state REGOLARE|IN_ESPANSIONE|RISCHIO_LOOP|BLOCCATO [--change-reason TEXT: required from the second forecast on, refused on the first] [--expected-revision N]\n  forecast --project-root .    (reads the recorded forecast; ranges only, never a percentage)\n  gate --project-root . --id G2 --status PASSED --evidence-file FILE --owner NAME\n  doc-diff --project-root . --id ART-123 --base-path docs/design.md --content-file temp.md --owner NAME [--expected-revision N --expected-hash HASH]\n  doc-mark-deletion --project-root . --id ART-123 --target TEXT --reason-file FILE --content-file FILE --owner NAME [--expected-revision N --expected-hash HASH]\n  doc-save --project-root . --id ART-123 --base-path docs/design.md --content-file temp.md --owner NAME [--sources DEC-1] [--expected-revision N --expected-hash HASH]\n  doc-history --project-root . --id ART-123\n  doc-restore --project-root . --id ART-123 --revision N --owner NAME [--expected-revision N --expected-hash HASH]\n  doc-finalize --project-root . --id ART-123 --owner NAME [--expected-revision N --expected-hash HASH] [--accept-base-overwrite]\n  qa-ask --project-root . --id QNA-0001 --question TEXT --rationale TEXT --owner NAME [--module N] [--agent NAME] [--planned]
+  console.log(`Plangonaut ${VERSION}\n\nUsage: plangonaut <command> [options]\n\nAlmost every command that changes the project requires --operation-id <unique-id>,\n3 to 128 characters. It is how a retried command is recognised as the same operation\nrather than applied twice, so it is required rather than generated, and it is omitted\nfrom the lines below only because it belongs to nearly all of them.\n\nThe exception is migrate-brand. It carries its own migration id and its own receipt,\nand is resumed or rolled back by that id rather than retried under an operation id, so\nit neither requires nor uses one. --operation-id is accepted there, as it is on every\ncommand, and has no effect.\n\nThe first command needs an owners file. It is one JSON object with these five keys,\neach naming the person accountable for that kind of decision:\n\n  {\"product\":\"Ada\",\"technical\":\"Ada\",\"budget\":\"Ada\",\"safety\":\"Ada\",\"release\":\"Ada\"}\n\nSave it anywhere and pass its path to --owners-file; the same person may hold more\nthan one role. An unknown key is refused, and so is a missing or empty one. What the\nroles mean, and when they matter, is in skills/plangonaut/references/user-guide.md.\n\nCommands:\n  capabilities\n  init --project-root . --project-name NAME --project-mode Resume --interaction-mode Standard --owners-file owners.json\n  status --project-root .\n  next --project-root . [--count 1|2|3]\n  resume --project-root .\n  record --project-root . --module N --status CONFIRMED --answer-file FILE --owner NAME\n  decision --project-root . --id DEC-ID --title TEXT --status APPROVED --owner NAME [--expected-revision N]\n  requirement --project-root . --id REQ-ID --title TEXT --status ACTIVE --owner NAME [--expected-revision N]\n  task --project-root . --id TSK-ID --title TEXT --status READY --owner NAME [--expected-revision N]\n  dependency --project-root . --id DEP-ID --from REQ-ID --to TSK-ID --type REQUIRES --owner NAME [--expected-revision N]\n  risk --project-root . --id RSK-ID --title TEXT --severity HIGH --status IDENTIFIED --owner NAME [--expected-revision N]\n  evidence --project-root . --id EVD-ID --file FILE --owner NAME [--expected-revision N]\n  agent --project-root . --id AGT-ID --name TEXT --status ACTIVE --owner NAME [--expected-revision N]\n  checkpoint --project-root . --id CHK-ID --name TEXT --owner NAME [--next-action TEXT] [--expected-revision N]\n  blocker-record --project-root . --id BLK-ID --title TEXT --reason TEXT --owner NAME [--evidence-file FILE] [--expected-revision N]\n  blocker-resolve --project-root . --id BLK-ID --resolution TEXT --owner NAME --expected-revision N [--evidence-file FILE]\n  blocker-verify-none --project-root . --owner NAME [--note TEXT]   (records that somebody looked and found none open)\n  override --project-root . --instruction-file FILE --owner NAME [--reason TEXT]\n  re-record --project-root . --kind override|gate --id OVR-ID|G2 --source-file FILE --owner NAME --reason TEXT\n  reconcile --project-root . --override-id ID --evidence-file FILE --owner NAME [--next-action TEXT] [--replace-human-next-action]\n  forecast --project-root . --owner NAME --phase TEXT --known-work TEXT --conditional-work TEXT --questions MIN-MAX --operations MIN-MAX --cycles MIN-MAX --confidence ALTA|MEDIA|BASSA --confidence-reason TEXT --cycle-state REGOLARE|IN_ESPANSIONE|RISCHIO_LOOP|BLOCCATO [--change-reason TEXT: required from the second forecast on, refused on the first] [--expected-revision N]\n  forecast --project-root .    (reads the recorded forecast; ranges only, never a percentage)\n  gate --project-root . --id G2 --status PASSED --evidence-file FILE --owner NAME\n  doc-diff --project-root . --id ART-123 --base-path docs/design.md --content-file temp.md --owner NAME [--expected-revision N --expected-hash HASH]\n  doc-mark-deletion --project-root . --id ART-123 --target TEXT --reason-file FILE --content-file FILE --owner NAME [--expected-revision N --expected-hash HASH]\n  doc-save --project-root . --id ART-123 --base-path docs/design.md --content-file temp.md --owner NAME [--sources DEC-1] [--expected-revision N --expected-hash HASH]\n  doc-history --project-root . --id ART-123\n  doc-restore --project-root . --id ART-123 --revision N --owner NAME [--expected-revision N --expected-hash HASH]\n  doc-finalize --project-root . --id ART-123 --owner NAME [--expected-revision N --expected-hash HASH] [--accept-base-overwrite]\n  qa-ask --project-root . --id QNA-0001 --question TEXT --rationale TEXT --owner NAME [--module N] [--agent NAME] [--planned]
   qa-answer --project-root . --id QNA-0001 --answer-file FILE --owner NAME [--agent NAME]
   qa-settle --project-root . --id QNA-0001 --interpretation TEXT --reply-file FILE --owner NAME [--consequences DEC-1,REQ-2] [--documents docs/a.md] [--open-points TEXT] [--next-id QNA-0002] [--next-question TEXT]
   qa-close --project-root . --id QNA-0001 --kind deferred|skipped|invalidated --reason TEXT --owner NAME
   qa-supersede --project-root . --id QNA-0001 --new-id QNA-0009 --question TEXT --rationale TEXT --reason TEXT --owner NAME
   qa-log --project-root . [--open] [--last] [--json] [--id QNA-0001] [--regenerate]
-  context-pack --project-root . [--output session.md]\n  validate --project-root .\n  migrate --project-root .\n  replay --project-root . [--verify]                     (rebuild the state from the events and compare)\n  replay --project-root . --repair --operation-id OP-ID  (put the rebuilt state back, keeping a backup)\n  baseline --project-root . --reason TEXT --owner NAME --operation-id OP-ID\n  recover --project-root . [--apply]                     (interrupted operations: what they are, and finish them)\n  unlock --project-root . [--force]                      (who holds the project lock, and release an abandoned one)\n  project-export --project-root . --output-dir DIR\n  project-verify --package-dir DIR\n  project-import --package-dir DIR --project-root NEW_DIR\n  export --target portable|codex|claude|gemini|agy --output-dir DIR\n  install --target codex|claude|gemini|agy|all [--scope project|workspace|user] [--project-root DIR] [--dry-run]\n  verify-install --target codex|claude|gemini|agy [--scope project|workspace|user] [--project-root DIR]\n  version`);
+  context-pack --project-root . [--output session.md]\n  validate --project-root .\n  migrate --project-root .\n  migrate-brand --project-root . --dry-run                   (what a brand migration would do; writes nothing)\n  migrate-brand --project-root .                             (.beave -> .plangonaut, verified backup and receipt)\n  migrate-brand --project-root . --resume                    (finish one that was interrupted)\n  migrate-brand --project-root . --rollback MIG-ID           (undo one, verifying receipt and backup)\n  migrate-brand --project-root . --rollback MIG-ID --discard-changes  (and throw away what was recorded since)\n  replay --project-root . [--verify]                     (rebuild the state from the events and compare)\n  replay --project-root . --repair --operation-id OP-ID  (put the rebuilt state back, keeping a backup)\n  baseline --project-root . --reason TEXT --owner NAME --operation-id OP-ID\n  recover --project-root . [--apply]                     (interrupted operations: what they are, and finish them)\n  unlock --project-root . [--force]                      (who holds the project lock, and release an abandoned one)\n  project-export --project-root . --output-dir DIR\n  project-verify --package-dir DIR\n  project-import --package-dir DIR --project-root NEW_DIR\n  export --target portable|codex|claude|gemini|agy --output-dir DIR\n  install --target codex|claude|gemini|agy|all [--scope project|workspace|user] [--project-root DIR] [--dry-run]\n  verify-install --target codex|claude|gemini|agy [--scope project|workspace|user] [--project-root DIR]\n  version`);
+}
+
+/**
+ * Commands whose stdout **is** a JSON document.
+ *
+ * `status` has always printed JSON and takes no `--json` to ask for it; every
+ * other command that can is asked with the flag. Both go through the same
+ * function so that "is this channel JSON?" has exactly one answer, and a command
+ * added to one list cannot be forgotten in the other.
+ */
+const ALWAYS_JSON_COMMANDS = new Set(["status"]);
+
+function jsonChannel(argv: string[]): boolean {
+  const command = argv[0];
+  return ALWAYS_JSON_COMMANDS.has(command) || argv.includes("--json");
+}
+
+/**
+ * A refusal as a document, for the callers that cannot read a sentence.
+ *
+ * Printed on **stdout**, alone, and nothing goes to stderr in this mode: a
+ * caller that merges the two streams must still get one parseable document.
+ * That is the whole point — mixing an explanation into the JSON channel is the
+ * defect this replaces, in the other direction.
+ *
+ * `blockers_assurance: "UNTRUSTED"` rides along on an untrusted project because
+ * that is the fourth value of the vocabulary `status` already publishes, and it
+ * was until now unreachable: the one command that could report it refused such a
+ * project outright. A consumer that switches on `blockers_assurance` now sees
+ * all four.
+ */
+/* ------------------------------------------------------------ migrate-brand */
+
+/**
+ * `.beave/` to `.plangonaut/`, explicitly, verifiably, and reversibly.
+ *
+ * Three properties shape everything below, and each of them is a decision that
+ * could have gone the other way:
+ *
+ * **A project at rest has exactly one state directory.** The first draft of the
+ * contract said a completed migration *retains* `.beave/`, and also that a
+ * project holding both directories is ambiguous and refused. That is a migration
+ * whose success condition is the failure state — it would have ended by making
+ * the project unusable by the engine that migrated it. The old bytes are kept,
+ * but under `.plangonaut/migrations/<id>/legacy-backup/`, where no resolver
+ * looks for state.
+ *
+ * **The staging directory is not called `.plangonaut`.** A half-built ledger
+ * that counts as an active state makes the project ambiguous for the duration of
+ * its own migration, and an interruption makes it ambiguous permanently.
+ * `.plangonaut-migration-<id>/` is recognised as staging and never as state.
+ *
+ * **The phase is written before it is attempted, not after.** An interrupted
+ * migration is then recognised by *which* phase it stopped in, rather than
+ * inferred from what happens to be on disk — and the two states that look
+ * identical on disk, "staged but not swapped" and "swapped but not cleaned",
+ * need opposite remedies.
+ */
+
+type MigrationPhase = "starting" | "staging" | "verified" | "swapped" | "cleaning";
+
+interface MigrationMarker {
+  migration_id: string;
+  phase: MigrationPhase;
+  started_at: string;
+  staging: string;
+  engine_version: string;
+}
+
+interface MigrationReceipt {
+  migration_id: string;
+  engine_version: string;
+  source_version: string;
+  target_version: string;
+  source_format: string;
+  target_format: string;
+  migrated_at: string;
+  files_migrated: string[];
+  files_preserved: string[];
+  references_updated: { file: string; from: string; to: string; count: number }[];
+  source_digest: string;
+  target_digest: string;
+  backup_digest: string;
+  file_digests: Record<string, string>;
+  verification: { schema: string; digests: string; replay: string };
+  rollback: { state: "available" | "applied" | "refused"; at: string | null; reason: string | null };
+}
+
+const MIGRATIONS_DIR = "migrations";
+const RECEIPT_NAME = "receipt.json";
+const LEGACY_BACKUP = "legacy-backup";
+
+function migrationMarkerPath(root: string): string {
+  return path.join(root, MIGRATION_MARKER);
+}
+
+function readMigrationMarker(root: string): MigrationMarker | null {
+  const location = migrationMarkerPath(root);
+  if (!fs.existsSync(location)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(location, "utf8")) as MigrationMarker;
+  } catch {
+    throw new PlangonautError(
+      `${MIGRATION_MARKER} is there but cannot be read, so what a migration was doing here cannot be established.\n` +
+        `Nothing was changed. Inspect it by hand before running anything else.`,
+      "MIGRATION_INCOMPLETE",
+    );
+  }
+}
+
+function writeMigrationMarker(root: string, marker: MigrationMarker): void {
+  fs.writeFileSync(migrationMarkerPath(root), `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+}
+
+/** Every file under a directory, relative, sorted, with `/` separators. */
+function treeFiles(directory: string): string[] {
+  const out: string[] = [];
+  const visit = (current: string) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) visit(full);
+      else if (entry.isFile()) out.push(path.relative(directory, full).split(path.sep).join("/"));
+    }
+  };
+  if (fs.existsSync(directory)) visit(directory);
+  return out.sort();
+}
+
+/**
+ * The digest that answers "has this project moved on since the migration?".
+ *
+ * Over the durable ledger and **not** over `migrations/`, which is the
+ * migration's own bookkeeping. The first version hashed the whole tree, and the
+ * receipt is written into that tree after the digest is taken — so every
+ * rollback refused, on a project nobody had touched, with a message accusing the
+ * user of changes they had not made. A guard that cries wolf on its own output
+ * is worse than no guard: it teaches people to pass `--discard-changes`.
+ */
+function stateDigest(directory: string): string {
+  const hash = crypto.createHash("sha256");
+  for (const relative of treeFiles(directory)) {
+    if (relative === MIGRATIONS_DIR || relative.startsWith(`${MIGRATIONS_DIR}/`)) continue;
+    if (relative === "lock.json") continue;
+    const one = crypto.createHash("sha256").update(fs.readFileSync(path.join(directory, relative))).digest("hex");
+    hash.update(relative).update("\u0000").update(one).update("\u0000");
+  }
+  return hash.digest("hex");
+}
+
+/** One digest over a whole tree: every relative path and the bytes under it. */
+function treeDigest(directory: string): { digest: string; files: Record<string, string> } {
+  const files: Record<string, string> = {};
+  const hash = crypto.createHash("sha256");
+  for (const relative of treeFiles(directory)) {
+    const bytes = fs.readFileSync(path.join(directory, relative));
+    const one = crypto.createHash("sha256").update(bytes).digest("hex");
+    files[relative] = one;
+    hash.update(relative).update("\u0000").update(one).update("\u0000");
+  }
+  return { digest: hash.digest("hex"), files };
+}
+
+/**
+ * The references a migration is allowed to rewrite.
+ *
+ * Only the ones that name the state directory **as a path**. Everything else in
+ * the ledger — decisions, answers, timestamps, digests of project documents,
+ * overrides, the event chain — is copied byte for byte, because rewriting any of
+ * it would make the migrated project a different project that happens to look
+ * similar.
+ *
+ * `.beave/` appears inside the ledger in exactly two shapes: as a recorded path
+ * to a document archived under the state directory, and inside prose the engine
+ * wrote. Both are rewritten; a path a *user* recorded pointing into `.beave/`
+ * is rewritten too, because the directory it names is about to stop existing.
+ */
+function rewriteStateReferences(text: string): { text: string; count: number } {
+  const from = `${LEGACY_STATE_DIR}/`;
+  const to = `${STATE_DIR}/`;
+  const backslash = `${LEGACY_STATE_DIR}\\`;
+  const backslashTo = `${STATE_DIR}\\`;
+  let count = 0;
+  let out = text;
+  for (const [a, b] of [[from, to], [backslash, backslashTo]] as const) {
+    let index = out.indexOf(a);
+    while (index !== -1) {
+      count += 1;
+      out = out.slice(0, index) + b + out.slice(index + a.length);
+      index = out.indexOf(a, index + b.length);
+    }
+  }
+  return { text: out, count };
+}
+
+/** Files whose text may carry a path into the state directory. */
+const MIGRATABLE_TEXT = new Set([".json", ".jsonl", ".md", ".txt"]);
+
+interface MigrationPlan {
+  root: string;
+  source: string;
+  files: string[];
+  bytes: number;
+  references: { file: string; from: string; to: string; count: number }[];
+  blockers: string[];
+  migrationId: string;
+  staging: string;
+  backup: string;
+  sourceVersion: string;
+  engineVersion: string;
+}
+
+/**
+ * Everything the migration would do, computed without touching the filesystem.
+ *
+ * The same function backs `--dry-run` and the real run, so what the preview
+ * shows is what the migration acts on rather than a second implementation that
+ * agrees with it by inspection.
+ */
+function planBrandMigration(root: string, migrationId: string): MigrationPlan {
+  const source = path.join(root, LEGACY_STATE_DIR);
+  const blockers: string[] = [];
+
+  if (fs.existsSync(path.join(root, STATE_DIR))) {
+    blockers.push(
+      `${STATE_DIR}/ already exists. A migration creates it; it does not merge into one. ` +
+        `If that directory is an earlier attempt, move it aside and run this again.`,
+    );
+  }
+  if (!fs.existsSync(source)) {
+    blockers.push(`There is no ${LEGACY_STATE_DIR}/ here, so there is nothing to migrate.`);
+  }
+  if (fs.existsSync(lockFile(root))) {
+    blockers.push(`The project is locked. A migration must not run while another command holds it.`);
+  }
+
+  const files = treeFiles(source);
+  let bytes = 0;
+  const references: { file: string; from: string; to: string; count: number }[] = [];
+  for (const relative of files) {
+    const full = path.join(source, relative);
+    bytes += fs.statSync(full).size;
+    if (!MIGRATABLE_TEXT.has(path.extname(relative).toLowerCase())) continue;
+    const original = fs.readFileSync(full, "utf8");
+    const { count } = rewriteStateReferences(original);
+    if (count > 0) {
+      references.push({ file: `${LEGACY_STATE_DIR}/${relative}`, from: `${LEGACY_STATE_DIR}/`, to: `${STATE_DIR}/`, count });
+    }
+  }
+
+  let sourceVersion = "not recorded";
+  const statePath = path.join(source, "state.json");
+  if (fs.existsSync(statePath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      sourceVersion = String(parsed?.beave_version ?? parsed?.plangonaut_version ?? "not recorded");
+    } catch {
+      blockers.push(`${LEGACY_STATE_DIR}/state.json cannot be parsed. Repair the project before migrating it.`);
+    }
+  } else if (fs.existsSync(source)) {
+    blockers.push(`${LEGACY_STATE_DIR}/state.json is missing. There is no state here to migrate.`);
+  }
+
+  return {
+    root,
+    source,
+    files,
+    bytes,
+    references,
+    blockers,
+    migrationId,
+    staging: path.join(root, `${MIGRATION_STAGING_PREFIX}${migrationId}`),
+    backup: `${STATE_DIR}/${MIGRATIONS_DIR}/${migrationId}/${LEGACY_BACKUP}/`,
+    sourceVersion,
+    engineVersion: VERSION,
+  };
+}
+
+function printMigrationPlan(plan: MigrationPlan): void {
+  console.log(`Brand migration preview for ${plan.root}`);
+  console.log("");
+  console.log(`  source format      ${LEGACY_STATE_DIR}/ (legacy)`);
+  console.log(`  target format      ${STATE_DIR}/`);
+  console.log(`  source version     ${plan.sourceVersion}`);
+  console.log(`  engine             ${plan.engineVersion}`);
+  console.log(`  migration id       ${plan.migrationId}`);
+  console.log("");
+  console.log(`  files              ${plan.files.length}`);
+  console.log(`  bytes              ${plan.bytes}`);
+  console.log(`  staging            ${path.basename(plan.staging)}/`);
+  console.log(`  backup             ${plan.backup}`);
+  console.log("");
+  console.log(`  preconditions checked: ${STATE_DIR}/ absent, ${LEGACY_STATE_DIR}/ present, no lock held,`);
+  console.log(`                         state parses, no migration already in flight`);
+  console.log("");
+  if (plan.references.length === 0) {
+    console.log("  no reference to the state directory is recorded inside the ledger");
+  } else {
+    console.log(`  references that would be rewritten (${plan.references.reduce((sum, item) => sum + item.count, 0)}):`);
+    for (const item of plan.references) console.log(`    ${item.file}: ${item.count} × ${item.from} → ${item.to}`);
+  }
+  console.log("");
+  if (plan.blockers.length) {
+    console.log("  BLOCKED:");
+    for (const blocker of plan.blockers) console.log(`    - ${blocker}`);
+  } else {
+    console.log("  no blockers");
+  }
+  console.log("");
+  console.log("Nothing was written. Run the same command without --dry-run to migrate.");
+}
+
+/** Copy the source ledger into staging, rewriting only state-directory paths. */
+function stageMigration(plan: MigrationPlan): { migrated: string[]; preserved: string[] } {
+  fs.mkdirSync(plan.staging, { recursive: true });
+  const migrated: string[] = [];
+  const preserved: string[] = [];
+  const rewritten = new Set(plan.references.map((item) => item.file.slice(LEGACY_STATE_DIR.length + 1)));
+
+  for (const relative of plan.files) {
+    const from = path.join(plan.source, relative);
+    const to = path.join(plan.staging, relative);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    if (rewritten.has(relative)) {
+      const { text } = rewriteStateReferences(fs.readFileSync(from, "utf8"));
+      fs.writeFileSync(to, text, "utf8");
+      migrated.push(relative);
+    } else {
+      // Byte for byte. Everything the project decided, asked, answered and
+      // recorded arrives unchanged, which is what makes this a migration of the
+      // directory rather than of the history inside it.
+      fs.copyFileSync(from, to);
+      preserved.push(relative);
+    }
+  }
+  return { migrated, preserved };
+}
+
+/**
+ * The old tree, kept where the resolver does not look, and provable.
+ *
+ * Under `migrations/<id>/legacy-backup/` inside the new state directory: it
+ * travels with the project, it is covered by the same reserved-path rules, and
+ * nothing counts it as a second active ledger.
+ */
+function writeLegacyBackup(plan: MigrationPlan): { digest: string; files: Record<string, string> } {
+  const destination = path.join(plan.staging, MIGRATIONS_DIR, plan.migrationId, LEGACY_BACKUP);
+  fs.mkdirSync(destination, { recursive: true });
+  for (const relative of plan.files) {
+    const to = path.join(destination, relative);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(path.join(plan.source, relative), to);
+  }
+  return treeDigest(destination);
+}
+
+function receiptPath(root: string, migrationId: string): string {
+  return path.join(root, STATE_DIR, MIGRATIONS_DIR, migrationId, RECEIPT_NAME);
+}
+
+/**
+ * Verify what was staged against what it came from.
+ *
+ * Three questions, answered separately because they fail for different reasons:
+ * does the state still parse and satisfy the schema; do the bytes that were not
+ * meant to change still match; does the history still replay.
+ */
+function verifyStaging(plan: MigrationPlan, preserved: string[]): { schema: string; digests: string; replay: string } {
+  const statePath = path.join(plan.staging, "state.json");
+  let parsed: any;
+  try {
+    parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
+  } catch (error) {
+    throw new PlangonautError(`The staged state does not parse: ${String((error as any)?.message ?? error)}. Nothing was swapped.`);
+  }
+  if (!parsed?.project?.name) {
+    throw new PlangonautError("The staged state has no project name, so it is not the state that was copied. Nothing was swapped.");
+  }
+
+  for (const relative of preserved) {
+    const before = crypto.createHash("sha256").update(fs.readFileSync(path.join(plan.source, relative))).digest("hex");
+    const after = crypto.createHash("sha256").update(fs.readFileSync(path.join(plan.staging, relative))).digest("hex");
+    if (before !== after) {
+      throw new PlangonautError(
+        `${relative} was supposed to be copied unchanged and is not identical in the staging tree. Nothing was swapped.`,
+      );
+    }
+  }
+
+  const events = path.join(plan.staging, "events.jsonl");
+  let replay = "no history recorded";
+  if (fs.existsSync(events)) {
+    const lines = fs.readFileSync(events, "utf8").split(/\r?\n/).filter((line) => line.trim().length > 0);
+    for (const [index, line] of lines.entries()) {
+      try {
+        JSON.parse(line);
+      } catch {
+        throw new PlangonautError(`Line ${index + 1} of the staged events is not valid JSON. Nothing was swapped.`);
+      }
+    }
+    replay = `${lines.length} events parse`;
+  }
+
+  return { schema: "state parses and names its project", digests: `${preserved.length} files identical`, replay };
+}
+
+/**
+ * Do it.
+ *
+ * The order is the recoverable one: everything that can be discarded happens
+ * before anything that cannot, and the marker names the next phase **before**
+ * that phase is attempted.
+ */
+function runBrandMigration(root: string, plan: MigrationPlan): void {
+  const marker: MigrationMarker = {
+    migration_id: plan.migrationId,
+    phase: "starting",
+    started_at: now(),
+    staging: path.basename(plan.staging),
+    engine_version: plan.engineVersion,
+  };
+  writeMigrationMarker(root, marker);
+
+  marker.phase = "staging";
+  writeMigrationMarker(root, marker);
+  const { migrated, preserved } = stageMigration(plan);
+  const backup = writeLegacyBackup(plan);
+  const sourceTree = treeDigest(plan.source);
+
+  const verification = verifyStaging(plan, preserved);
+  marker.phase = "verified";
+  writeMigrationMarker(root, marker);
+
+  const receipt: MigrationReceipt = {
+    migration_id: plan.migrationId,
+    engine_version: plan.engineVersion,
+    source_version: plan.sourceVersion,
+    target_version: plan.engineVersion,
+    source_format: LEGACY_STATE_DIR,
+    target_format: STATE_DIR,
+    migrated_at: now(),
+    files_migrated: migrated,
+    files_preserved: preserved,
+    references_updated: plan.references,
+    source_digest: sourceTree.digest,
+    target_digest: "",
+    backup_digest: backup.digest,
+    file_digests: backup.files,
+    verification,
+    rollback: { state: "available", at: null, reason: null },
+  };
+  const receiptInStaging = path.join(plan.staging, MIGRATIONS_DIR, plan.migrationId, RECEIPT_NAME);
+  fs.mkdirSync(path.dirname(receiptInStaging), { recursive: true });
+  fs.writeFileSync(receiptInStaging, `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+
+  // The swap. From here the project's state directory is the new one.
+  marker.phase = "swapped";
+  writeMigrationMarker(root, marker);
+  fs.renameSync(plan.staging, path.join(root, STATE_DIR));
+
+  // The old directory goes only after its bytes are provably inside the new one.
+  marker.phase = "cleaning";
+  writeMigrationMarker(root, marker);
+  const kept = treeDigest(path.join(root, STATE_DIR, MIGRATIONS_DIR, plan.migrationId, LEGACY_BACKUP));
+  if (kept.digest !== backup.digest) {
+    throw new PlangonautError(
+      `The backup inside ${STATE_DIR}/ does not match what was written. ${LEGACY_STATE_DIR}/ has been left where it is.`,
+      "MIGRATION_INCOMPLETE",
+    );
+  }
+  fs.rmSync(plan.source, { recursive: true, force: true });
+
+  const finalDigest = stateDigest(path.join(root, STATE_DIR));
+  receipt.target_digest = finalDigest;
+  fs.writeFileSync(receiptPath(root, plan.migrationId), `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+
+  fs.rmSync(migrationMarkerPath(root), { force: true });
+
+  console.log(`Migrated ${root} from ${LEGACY_STATE_DIR}/ to ${STATE_DIR}/.`);
+  console.log("");
+  console.log(`  migration id      ${plan.migrationId}`);
+  console.log(`  files migrated    ${migrated.length} (references rewritten)`);
+  console.log(`  files preserved   ${preserved.length} (byte for byte)`);
+  console.log(`  source digest     ${sourceTree.digest}`);
+  console.log(`  target digest     ${finalDigest}`);
+  console.log(`  backup            ${STATE_DIR}/${MIGRATIONS_DIR}/${plan.migrationId}/${LEGACY_BACKUP}/`);
+  console.log(`  backup digest     ${backup.digest}`);
+  console.log(`  receipt           ${STATE_DIR}/${MIGRATIONS_DIR}/${plan.migrationId}/${RECEIPT_NAME}`);
+  console.log("");
+  console.log(`Next: run \`plangonaut validate --project-root .\` to confirm, and \`plangonaut resume --project-root .\` to continue.`);
+  console.log(`To undo: \`plangonaut migrate-brand --project-root . --rollback ${plan.migrationId}\``);
+}
+
+/**
+ * Finish a migration that stopped, from whichever phase it stopped in.
+ *
+ * The two phases that look identical on disk need opposite work, which is the
+ * whole reason the marker records a phase rather than the engine inferring one:
+ * `verified` has a staging tree to promote, `swapped` has an old directory to
+ * retire. Guessing between them by looking at the filesystem would eventually
+ * guess wrong on a project nobody could reconstruct.
+ */
+function resumeBrandMigration(root: string, marker: MigrationMarker): void {
+  const staging = path.join(root, marker.staging);
+  const target = path.join(root, STATE_DIR);
+  const source = path.join(root, LEGACY_STATE_DIR);
+
+  if (marker.phase === "starting" || marker.phase === "staging") {
+    throw new PlangonautError(
+      `The migration stopped at phase "${marker.phase}", before anything was verified. There is nothing to finish.\n` +
+        `Discard it and start again:\n  plangonaut migrate-brand --project-root . --rollback ${marker.migration_id}`,
+      "MIGRATION_INCOMPLETE",
+    );
+  }
+
+  if (marker.phase === "verified") {
+    if (!fs.existsSync(staging)) {
+      throw new PlangonautError(
+        `The marker says the staging was verified, and ${marker.staging}/ is not there. Nothing can be finished from this state.`,
+        "MIGRATION_INCOMPLETE",
+      );
+    }
+    marker.phase = "swapped";
+    writeMigrationMarker(root, marker);
+    fs.renameSync(staging, target);
+  }
+
+  const receipt = JSON.parse(fs.readFileSync(receiptPath(root, marker.migration_id), "utf8")) as MigrationReceipt;
+  const kept = treeDigest(path.join(target, MIGRATIONS_DIR, marker.migration_id, LEGACY_BACKUP));
+  if (kept.digest !== receipt.backup_digest) {
+    throw new PlangonautError(
+      `The backup inside ${STATE_DIR}/ does not match its receipt, so ${LEGACY_STATE_DIR}/ will not be removed.\n` +
+        `Nothing was changed.`,
+      "MIGRATION_INCOMPLETE",
+    );
+  }
+  if (fs.existsSync(source)) {
+    marker.phase = "cleaning";
+    writeMigrationMarker(root, marker);
+    fs.rmSync(source, { recursive: true, force: true });
+  }
+
+  receipt.target_digest = stateDigest(target);
+  fs.writeFileSync(receiptPath(root, marker.migration_id), `${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+  fs.rmSync(migrationMarkerPath(root), { force: true });
+  console.log(`Migration ${marker.migration_id} finished. ${STATE_DIR}/ is the only state directory here.`);
+}
+
+/**
+ * Put it back, and refuse rather than half-do it.
+ *
+ * Rollback is where a migration tool is most dangerous, because it runs when
+ * somebody is already unhappy. So every check below refuses instead of
+ * repairing: a receipt that does not parse, a backup whose digest moved, or a
+ * `.plangonaut/` that has been written to since the migration all stop the
+ * command. The last of those is the one that matters most — rolling back over
+ * work done after the migration would delete it without mentioning it.
+ */
+function rollbackBrandMigration(root: string, migrationId: string, discardChanges: boolean): void {
+  const target = path.join(root, STATE_DIR);
+  const source = path.join(root, LEGACY_STATE_DIR);
+  const marker = readMigrationMarker(root);
+
+  // An interrupted migration that never swapped: discard the staging and stop.
+  if (marker && (marker.phase === "starting" || marker.phase === "staging")) {
+    const staging = path.join(root, marker.staging);
+    if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+    fs.rmSync(migrationMarkerPath(root), { force: true });
+    console.log(`Discarded the unfinished migration ${marker.migration_id}. ${LEGACY_STATE_DIR}/ is untouched.`);
+    return;
+  }
+  if (marker && marker.phase === "verified") {
+    const staging = path.join(root, marker.staging);
+    if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true });
+    fs.rmSync(migrationMarkerPath(root), { force: true });
+    console.log(`Discarded the verified but unswapped migration ${marker.migration_id}. ${LEGACY_STATE_DIR}/ is untouched.`);
+    return;
+  }
+
+  const location = receiptPath(root, migrationId);
+  if (!fs.existsSync(location)) {
+    throw new PlangonautError(
+      `No receipt for migration ${migrationId} at ${STATE_DIR}/${MIGRATIONS_DIR}/${migrationId}/${RECEIPT_NAME}.\n` +
+        `A rollback without its receipt cannot prove what it would be restoring. Nothing was changed.`,
+    );
+  }
+  let receipt: MigrationReceipt;
+  try {
+    receipt = JSON.parse(fs.readFileSync(location, "utf8")) as MigrationReceipt;
+  } catch (error) {
+    throw new PlangonautError(`The receipt for ${migrationId} cannot be read: ${String((error as any)?.message ?? error)}. Nothing was changed.`);
+  }
+
+  const backupDir = path.join(target, MIGRATIONS_DIR, migrationId, LEGACY_BACKUP);
+  if (!fs.existsSync(backupDir)) {
+    throw new PlangonautError(`The backup for ${migrationId} is not there. Nothing was changed.`);
+  }
+  const backup = treeDigest(backupDir);
+  if (backup.digest !== receipt.backup_digest) {
+    throw new PlangonautError(
+      `The backup for ${migrationId} does not match the digest its receipt records.\n` +
+        `  recorded ${receipt.backup_digest}\n  found    ${backup.digest}\n` +
+        `Restoring it would restore something other than what was migrated. Nothing was changed.`,
+    );
+  }
+
+  // Has the project moved on since the migration?
+  const current = stateDigest(target);
+  if (receipt.target_digest && current !== receipt.target_digest && !discardChanges) {
+    throw new PlangonautError(
+      `${STATE_DIR}/ has changed since migration ${migrationId}.\n` +
+        `  at migration ${receipt.target_digest}\n  now          ${current}\n` +
+        `A rollback would discard everything recorded since. If that is what you want, say so:\n` +
+        `  plangonaut migrate-brand --project-root . --rollback ${migrationId} --discard-changes\n` +
+        `Nothing was changed.`,
+    );
+  }
+
+  if (fs.existsSync(source)) {
+    throw new PlangonautError(
+      `${LEGACY_STATE_DIR}/ already exists, so a rollback would produce two state directories. Nothing was changed.`,
+      "PROJECT_STATE_AMBIGUOUS",
+    );
+  }
+
+  // Rebuild in staging, verify, then swap — the same order as the migration.
+  const staging = path.join(root, `${MIGRATION_STAGING_PREFIX}${migrationId}-rollback`);
+  fs.rmSync(staging, { recursive: true, force: true });
+  fs.mkdirSync(staging, { recursive: true });
+  for (const relative of treeFiles(backupDir)) {
+    const to = path.join(staging, relative);
+    fs.mkdirSync(path.dirname(to), { recursive: true });
+    fs.copyFileSync(path.join(backupDir, relative), to);
+  }
+  const rebuilt = treeDigest(staging);
+  if (rebuilt.digest !== receipt.backup_digest) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw new PlangonautError(`The rebuilt ${LEGACY_STATE_DIR}/ does not match the backup digest. Nothing was changed.`);
+  }
+
+  const retired = path.join(root, `${MIGRATION_STAGING_PREFIX}${migrationId}-retired`);
+  fs.rmSync(retired, { recursive: true, force: true });
+  fs.renameSync(target, retired);
+  fs.renameSync(staging, source);
+  fs.rmSync(retired, { recursive: true, force: true });
+
+  console.log(`Rolled back migration ${migrationId}. ${LEGACY_STATE_DIR}/ is the only state directory here.`);
+  console.log(`  backup digest verified  ${backup.digest}`);
+  if (discardChanges && receipt.target_digest && current !== receipt.target_digest) {
+    console.log(`  discarded changes made after the migration, as asked`);
+  }
+}
+
+function migrateBrand(flags: Flags): void {
+  const root = resolveProject(required(flags, "project-root"));
+  const rollback = flags["rollback"];
+  const marker = readMigrationMarker(root);
+
+  if (typeof rollback === "string" && rollback.length > 0) {
+    rollbackBrandMigration(root, rollback, flags["discard-changes"] === true);
+    return;
+  }
+  if (flags["resume"] === true) {
+    if (!marker) throw new PlangonautError(`No migration is in flight here: there is no ${MIGRATION_MARKER}.`);
+    resumeBrandMigration(root, marker);
+    return;
+  }
+  if (marker) {
+    throw new PlangonautError(
+      `A migration is already in flight here: ${marker.migration_id}, stopped at phase "${marker.phase}".\n` +
+        `Finish it or undo it:\n` +
+        `  plangonaut migrate-brand --project-root . --resume\n` +
+        `  plangonaut migrate-brand --project-root . --rollback ${marker.migration_id}`,
+      "MIGRATION_INCOMPLETE",
+    );
+  }
+
+  const migrationId = `MIG-${crypto.randomBytes(6).toString("hex")}`;
+  const plan = planBrandMigration(root, migrationId);
+
+  if (flags["dry-run"] === true) {
+    printMigrationPlan(plan);
+    return;
+  }
+  if (plan.blockers.length) {
+    throw new PlangonautError(`This project cannot be migrated:\n- ${plan.blockers.join("\n- ")}\nNothing was written.`);
+  }
+  runBrandMigration(root, plan);
+}
+
+function printJsonError(argv: string[], error: any): void {
+  const kind: ErrorKind = error instanceof PlangonautError ? error.kind : "COMMAND_FAILED";
+  const payload: Record<string, unknown> = {
+    ok: false,
+    error: {
+      kind,
+      message: String(error?.message ?? error),
+      command: argv[0] ?? null,
+    },
+  };
+  if (kind === "PROJECT_STATE_UNTRUSTED") payload.blockers_assurance = "UNTRUSTED";
+  console.log(JSON.stringify(payload, null, 2));
 }
 
 export async function main(argv: string[]): Promise<number> {
@@ -7580,6 +9041,9 @@ export async function main(argv: string[]): Promise<number> {
     else if (command === "qa-supersede") qaSupersede(flags);
     else if (command === "qa-log") qaLog(flags);
     else if (command === "record") record(flags);
+    else if (command === "blocker-record") blockerRecord(flags);
+    else if (command === "blocker-resolve") blockerResolve(flags);
+    else if (command === "blocker-verify-none") blockerVerifyNone(flags);
     else if (LEDGER_RULES[command]) ledgerMutation(command, flags);
     else if (command === "override") override(flags);
     else if (command === "re-record") reRecord(flags);
@@ -7598,13 +9062,13 @@ export async function main(argv: string[]): Promise<number> {
       const state = validateRoot(root, true);
       // Reported here and nowhere else: see `recordedDigestErrors`.
       const drift = recordedDigestErrors(root, state);
-      if (drift.length) throw new BeaveError(`Validation failed:\n- ${drift.join("\n- ")}`);
+      if (drift.length) throw new PlangonautError(`Validation failed:\n- ${drift.join("\n- ")}`, "PROJECT_STATE_UNTRUSTED");
       // The history is part of what "valid" means now. A project whose state does
       // not match its own events is not valid; one whose events predate the replay
       // format is, and is told what it cannot prove rather than refused.
       const history = historyErrors(root, state);
-      if (history.errors.length) throw new BeaveError(`Validation failed:\n- ${history.errors.join("\n- ")}`);
-      console.log("Beave state is valid.");
+      if (history.errors.length) throw new PlangonautError(`Validation failed:\n- ${history.errors.join("\n- ")}`, "PROJECT_STATE_UNTRUSTED");
+      console.log("Plangonaut state is valid.");
       // Said out loud, because the alternative is the defect B5 was: a project
       // reporting "valid" over gates whose evidence nothing had looked at since.
       const gapNote = unverifiableGateNote(state);
@@ -7612,16 +9076,30 @@ export async function main(argv: string[]): Promise<number> {
       for (const note of history.notes) console.log(`\n${note}`);
     }
     else if (command === "migrate") migrate(flags);
+    else if (command === "migrate-brand") migrateBrand(flags);
     else if (command === "project-export") projectExport(flags);
     else if (command === "project-verify") projectVerify(flags);
     else if (command === "project-import") projectImport(flags);
     else if (command === "export") exportTarget(flags);
     else if (command === "install") install(flags);
     else if (command === "verify-install") verifyInstall(flags);
-    else throw new BeaveError(`Unknown command: ${command}`);
+    else throw new PlangonautError(`Unknown command: ${command}`);
     return 0;
   } catch (error: any) {
-    console.error(`BEAVE ERROR: ${error.message}`);
+    /*
+     * Two channels, never both.
+     *
+     * A human gets the sentence on stderr, as always. A caller that asked for
+     * JSON gets a document on stdout and nothing on stderr, because a caller
+     * that redirects `2>&1` would otherwise be handed a prefix that is not JSON
+     * — which is exactly the failure this is meant to remove.
+     *
+     * The exit code is unchanged at 2. `kind` is the new information; renumbering
+     * the exits would break every caller that already handles the old ones for
+     * the sake of a distinction this field already carries.
+     */
+    if (jsonChannel(argv)) printJsonError(argv, error);
+    else console.error(`PLANGONAUT ERROR: ${error.message}`);
     return 2;
   } finally {
     // The lock is released on the way out however the command ended, and again

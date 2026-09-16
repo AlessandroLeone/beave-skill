@@ -24,8 +24,8 @@ import { ageProject } from "./older-engine.mjs";
  * how this file is pointed at a reverted engine without a second copy of the tests.
  */
 
-const CLI = process.env.BEAVE_CLI ? path.resolve(process.env.BEAVE_CLI) : path.resolve("lib/bin/beave.js");
-const SCHEMA = path.resolve("skills/beave/schemas/state-v3.schema.json");
+const CLI = process.env.PLANGONAUT_CLI ? path.resolve(process.env.PLANGONAUT_CLI) : path.resolve("lib/bin/plangonaut.js");
+const SCHEMA = path.resolve("skills/plangonaut/schemas/state-v3.schema.json");
 const owners = { product: "Ada", technical: "Ada", budget: "Ada", safety: "Ada", release: "Ada" };
 
 function run(args, cwd) {
@@ -34,19 +34,19 @@ function run(args, cwd) {
 }
 
 function readState(root) {
-  return JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  return JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
 }
 
 function events(root) {
   return fs
-    .readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8")
+    .readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8")
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 }
 
 function project(name = "D5") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-d5-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-d5-"));
   fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify(owners));
   const result = run([
     "init", "--project-root", ".", "--project-name", name, "--project-mode", "Genesis",
@@ -234,7 +234,7 @@ describe("D5 scenario 3: two cycles on the same defect family raise a loop signa
     // Every project written before ALN-008 is in this shape. An absent signal must
     // read as "not observable here", never as "did not happen".
     const root = projectWithReopenedTask("StatusHistoryStripped");
-    const location = path.join(root, ".beave", "events.jsonl");
+    const location = path.join(root, ".plangonaut", "events.jsonl");
     const stripped = fs
       .readFileSync(location, "utf8")
       .split(/\r?\n/)
@@ -373,11 +373,11 @@ describe("D5 scenario 6: a project that never recorded a forecast says so", () =
       /No progress forecast has ever been recorded for this project\. That is not zero remaining work, not a default and not a measurement: nothing was recorded\./,
     );
     // A refusal or a gap has to name the way out.
-    assert.match(read.stdout, /Record one with: beave forecast --project-root \. --owner NAME/);
+    assert.match(read.stdout, /Record one with: plangonaut forecast --project-root \. --owner NAME/);
 
     const resumed = run(["resume", "--project-root", "."], root);
     assert.match(resumed.stdout, /No progress forecast has ever been recorded for this project\./);
-    assert.match(resumed.stdout, /Record one with: beave forecast/);
+    assert.match(resumed.stdout, /Record one with: plangonaut forecast/);
 
     const status = JSON.parse(run(["status", "--project-root", "."], root).stdout);
     assert.strictEqual(status.progress_forecast.recorded, false);
@@ -451,7 +451,7 @@ describe("D5: the engine names a disagreement instead of settling it", () => {
     assert.match(grown.stdout, /Derived by the engine from recorded data: RISCHIO_LOOP/);
     assert.match(
       grown.stdout,
-      /The recorded cycle state was NOT changed\. Beave does not overwrite a person's judgement and does not accept it in silence either; the signals are stored beside it in progress_forecast\.signals\./,
+      /The recorded cycle state was NOT changed\. Plangonaut does not overwrite a person's judgement and does not accept it in silence either; the signals are stored beside it in progress_forecast\.signals\./,
     );
 
     // The disagreement travels with the folder, not only with the terminal of
@@ -588,13 +588,13 @@ describe("D5: the record behaves like every other governed mutation", () => {
   it("is recoverable: event, backup, and a cleared transaction", () => {
     const root = project("Recovery");
     assert.strictEqual(forecast(root, BASE).status, 0);
-    const transactions = path.join(root, ".beave", "transactions");
+    const transactions = path.join(root, ".plangonaut", "transactions");
     assert.ok(
       !fs.existsSync(transactions) || fs.readdirSync(transactions).length === 0,
       "a completed forecast leaves no open transaction",
     );
     assert.ok(
-      fs.readdirSync(path.join(root, ".beave", "backups")).some((name) => name.startsWith("state.json.")),
+      fs.readdirSync(path.join(root, ".plangonaut", "backups")).some((name) => name.startsWith("state.json.")),
       "the previous state must stay recoverable",
     );
   });
@@ -675,7 +675,7 @@ describe("D5: the stored record matches the published schema", () => {
   it("refuses a hand-edited forecast that carries a percentage or a broken range", () => {
     const root = project("HandEdited");
     assert.strictEqual(forecast(root, BASE).status, 0);
-    const location = path.join(root, ".beave", "state.json");
+    const location = path.join(root, ".plangonaut", "state.json");
 
     const withPercentage = readState(root);
     withPercentage.progress_forecast.percent_complete = 60;
@@ -695,7 +695,7 @@ describe("D5: the stored record matches the published schema", () => {
 
   it("keeps a project that never recorded a forecast valid, and migrates one without inventing a value", () => {
     const root = project("Migration");
-    const location = path.join(root, ".beave", "state.json");
+    const location = path.join(root, ".plangonaut", "state.json");
     const state = readState(root);
     assert.strictEqual(run(["validate", "--project-root", "."], root).status, 0, "absent fields are valid");
 

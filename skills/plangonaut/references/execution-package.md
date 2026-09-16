@@ -2,7 +2,7 @@
 
 **Contract:** EXEC-001, version 1.0.0. A provider-neutral information contract, not an implemented archive command or a fixed directory layout.
 
-Read before selecting artifacts, planning work, preparing agent prompts and handing off. The output is the user's project folder, distinct from Beave's own installed skill/package/repository. Semantic-only and Hybrid must meet the same information requirements.
+Read before selecting artifacts, planning work, preparing agent prompts and handing off. The output is the user's project folder, distinct from Plangonaut's own installed skill/package/repository. Semantic-only and Hybrid must meet the same information requirements.
 
 ## Required information roles
 

@@ -1,6 +1,0 @@
-interface:
-  display_name: "Beave"
-  short_description: "Progetta e governa un progetto completo"
-  default_prompt: "Usa $beave per guidarmi, una decisione alla volta, dalla definizione del progetto fino al piano, agli agenti e ai gate di rilascio."
-policy:
-  allow_implicit_invocation: true

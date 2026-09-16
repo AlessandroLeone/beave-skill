@@ -2,7 +2,7 @@ node_modules/
 .npm-cache/
 .logs/
 *.tgz
-.beave/
+.plangonaut/
 .DS_Store
 Thumbs.db
 temp/

@@ -1,13 +1,13 @@
-# Beave
+# Plangonaut
 
-Beave prepares a complete multidisciplinary project folder: specifications, decisions, resources, execution strategy, agents where useful, tasks, verification, recovery and completion conditions. It asks all necessary questions without a total question or document cap.
+Plangonaut prepares a complete multidisciplinary project folder: specifications, decisions, resources, execution strategy, agents where useful, tasks, verification, recovery and completion conditions. It asks all necessary questions without a total question or document cap.
 
 ## Semantic and programmatic use
 
-- **Semantic-only:** provide the Markdown skill and references or Portable Edition. The host AI produces the complete project through approved file tools or manual delivery. No Beave CLI, npm, executable, Git repository or Studio is required.
+- **Semantic-only:** provide the Markdown skill and references or Portable Edition. The host AI produces the complete project through approved file tools or manual delivery. No Plangonaut CLI, npm, executable, Git repository or Studio is required.
 - **Hybrid:** the same semantic method plus the TypeScript/Node CLI for supported deterministic persistence, validation, versions and Resume. Completeness requirements are identical; mechanical guarantees differ.
 
-A repository distributes/develops Beave; npm/npx and a verified CLI executable distribute its programmatic capability. Installing the skill only makes its instructions discoverable. None of these supplies an AI model. The user's output folder need not be a software or npm project. Studio's optional desktop executable is separate from the CLI.
+A repository distributes/develops Plangonaut; npm/npx and a verified CLI executable distribute its programmatic capability. Installing the skill only makes its instructions discoverable. None of these supplies an AI model. The user's output folder need not be a software or npm project. Studio's optional desktop executable is separate from the CLI.
 
 ## Current alpha
 
@@ -21,16 +21,16 @@ Provide the skill/references or Portable Edition to the chosen host. Establish m
 
 ## Documentation
 
-- [Semantic entry point](skills/beave/SKILL.md)
-- [User guide](skills/beave/references/user-guide.md)
-- [Coverage contract](skills/beave/references/coverage-contract.md)
-- [Execution package](skills/beave/references/execution-package.md)
-- [Engine capabilities and limits](skills/beave/references/engine-contract.md)
-- [Runtime and distribution](skills/beave/references/runtime-compatibility.md)
+- [Semantic entry point](skills/plangonaut/SKILL.md)
+- [User guide](skills/plangonaut/references/user-guide.md)
+- [Coverage contract](skills/plangonaut/references/coverage-contract.md)
+- [Execution package](skills/plangonaut/references/execution-package.md)
+- [Engine capabilities and limits](skills/plangonaut/references/engine-contract.md)
+- [Runtime and distribution](skills/plangonaut/references/runtime-compatibility.md)
 - [Behavioral evaluation scenarios](tests/scenarios/complete-project-preparation.md)
 
 ## Ownership and boundaries
 
 Public skill/core/CLI sources are Apache-2.0. Website and Studio source remain private. Base Studio reads, edits and visualizes project files; assisted review, linked-file change impact and reconciliation are future optional subscription features. Semantic/CLI handling of corrections remains free.
 
-Beave initialization prepares the future execution system and does not launch its agents. Publication, push, deployment, spending and external connections require their own authority.
+Plangonaut initialization prepares the future execution system and does not launch its agents. Publication, push, deployment, spending and external connections require their own authority.

@@ -2,10 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Turn a fixture into a project an older Beave really could have written.
+ * Turn a fixture into a project an older Plangonaut really could have written.
  *
  * Several tests simulate "a project created before feature X" by editing
- * `.beave/state.json` directly after a real `beave init`. That used to work
+ * `.plangonaut/state.json` directly after a real `plangonaut init`. That used to work
  * because nothing compared the two files. It does not any more: an event now
  * records the digest of the state it produced, and the engine refuses to write
  * on top of a state that does not match its own history — which is the whole
@@ -30,7 +30,7 @@ const REPLAY_FIELDS = [
 ];
 
 export function ageProject(root) {
-  const location = path.join(root, ".beave", "events.jsonl");
+  const location = path.join(root, ".plangonaut", "events.jsonl");
   if (!fs.existsSync(location)) return 0;
   let aged = 0;
   const lines = fs

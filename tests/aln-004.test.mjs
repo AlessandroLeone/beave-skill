@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const CLI = path.resolve("lib/bin/beave.js");
+const CLI = path.resolve("lib/bin/plangonaut.js");
 const owners = { product: "A", technical: "B", budget: "C", safety: "D", release: "E" };
 
 function run(args, cwd) {
@@ -20,7 +20,7 @@ function run(args, cwd) {
 }
 
 function project(name = "ALN004") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-aln004-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-aln004-"));
   fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify(owners));
   const result = run(["init", "--project-root", ".", "--project-name", name, "--project-mode", "Genesis", "--interaction-mode", "Standard", "--owners-file", "owners.json", "--operation-id", `OP-init-${name.replace(/[^A-Za-z0-9._:-]/g, "-")}`], root);
   assert.strictEqual(result.status, 0, result.stderr);
@@ -43,7 +43,7 @@ describe("ALN-004 deterministic closure", () => {
     assert.strictEqual(result.status, 2);
     assert.match(result.stderr, /(base_path collision|Refusing to overwrite untracked working file)/);
     assert.strictEqual(fs.readFileSync(path.join(root, "docs/spec-v1.md"), "utf8"), original);
-    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(root, ".beave/state.json"), "utf8")).artifacts.length, 1);
+    assert.strictEqual(JSON.parse(fs.readFileSync(path.join(root, ".plangonaut/state.json"), "utf8")).artifacts.length, 1);
   });
 
   it("binds a caller operation ID to one normalized request", () => {
@@ -65,26 +65,26 @@ describe("ALN-004 deterministic closure", () => {
 
   it("recovers a state-only init crash before retrying the same initialization", () => {
     const root = project("Init crash");
-    const statePath = path.join(root, ".beave", "state.json");
-    const eventsPath = path.join(root, ".beave", "events.jsonl");
+    const statePath = path.join(root, ".plangonaut", "state.json");
+    const eventsPath = path.join(root, ".plangonaut", "events.jsonl");
     const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    const transaction = path.join(root, ".beave", "transactions", state.last_event_id);
+    const transaction = path.join(root, ".plangonaut", "transactions", state.last_event_id);
     fs.mkdirSync(transaction, { recursive: true });
     fs.writeFileSync(path.join(transaction, "manifest.json"), JSON.stringify({
-      format: "beave-file-transaction-v1",
+      format: "plangonaut-file-transaction-v1",
       event_id: state.last_event_id,
       state_revision: 1,
       created_at: state.updated_at,
       files: [
-        { path: ".beave/state.json", existed: false, backup: null },
-        { path: ".beave/events.jsonl", existed: false, backup: null }
+        { path: ".plangonaut/state.json", existed: false, backup: null },
+        { path: ".plangonaut/events.jsonl", existed: false, backup: null }
       ]
     }));
     fs.rmSync(eventsPath);
     const result = run(["init", "--project-root", ".", "--project-name", "Init crash", "--project-mode", "Genesis", "--interaction-mode", "Standard", "--owners-file", "owners.json", "--operation-id", "OP-init-Init-crash"], root);
     assert.strictEqual(result.status, 0, result.stderr);
     assert.ok(fs.existsSync(eventsPath));
-    assert.ok(fs.existsSync(path.join(root, ".beave", "recovery", `${state.last_event_id}.rolled-back.json`)));
+    assert.ok(fs.existsSync(path.join(root, ".plangonaut", "recovery", `${state.last_event_id}.rolled-back.json`)));
   });
 
   it("refuses gate advancement when governed document integrity is broken", () => {
@@ -107,20 +107,20 @@ describe("ALN-004 deterministic closure", () => {
     const preview = run(["doc-diff", "--project-root", ".", "--id", "ART-RECOVERY", "--base-path", "docs/recovery.md", "--content-file", "draft.md", "--owner", "A"], root);
     let result = run(["doc-save", "--project-root", ".", "--id", "ART-RECOVERY", "--base-path", "docs/recovery.md", "--content-file", "draft.md", "--owner", "A", "--confirm-token", JSON.parse(preview.stdout).confirmation_token], root);
     assert.strictEqual(result.status, 0, result.stderr);
-    const tx = path.join(root, ".beave", "transactions", "INTERRUPTED");
+    const tx = path.join(root, ".plangonaut", "transactions", "INTERRUPTED");
     fs.mkdirSync(tx, { recursive: true });
-    const tracked = [".beave/state.json", ".beave/events.jsonl", "docs/recovery-v1.md"];
+    const tracked = [".plangonaut/state.json", ".plangonaut/events.jsonl", "docs/recovery-v1.md"];
     const files = tracked.map((relative, index) => {
       fs.copyFileSync(path.join(root, relative), path.join(tx, `backup-${index}`));
       return { path: relative, existed: true, backup: `backup-${index}` };
     });
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave/state.json"), "utf8"));
-    fs.writeFileSync(path.join(tx, "manifest.json"), JSON.stringify({ format: "beave-file-transaction-v1", event_id: "INTERRUPTED", state_revision: state.revision + 1, files }));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut/state.json"), "utf8"));
+    fs.writeFileSync(path.join(tx, "manifest.json"), JSON.stringify({ format: "plangonaut-file-transaction-v1", event_id: "INTERRUPTED", state_revision: state.revision + 1, files }));
     fs.writeFileSync(path.join(root, "docs/recovery-v1.md"), "partial");
     result = run(["validate", "--project-root", "."], root);
     assert.strictEqual(result.status, 0, result.stderr);
     assert.strictEqual(fs.readFileSync(path.join(root, "docs/recovery-v1.md"), "utf8"), "safe");
-    assert.ok(fs.existsSync(path.join(root, ".beave/recovery/INTERRUPTED.rolled-back.json")));
+    assert.ok(fs.existsSync(path.join(root, ".plangonaut/recovery/INTERRUPTED.rolled-back.json")));
   });
   it("creates and safely updates typed ledgers while rejecting stale writes and dangling links", () => {
     const root = project();
@@ -133,16 +133,16 @@ describe("ALN-004 deterministic closure", () => {
     result = run(["dependency", "--project-root", ".", "--id", "DEP-HANDOFF", "--from", "REQ-HANDOFF", "--to", "TSK-EXPORT", "--type", "REQUIRES", "--owner", "B"], root);
     assert.strictEqual(result.status, 0, result.stderr);
 
-    const before = fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8");
+    const before = fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8");
     result = run(["task", "--project-root", ".", "--id", "TSK-EXPORT", "--title", "Changed", "--status", "DONE", "--owner", "B", "--expected-revision", "9"], root);
     assert.strictEqual(result.status, 2);
     assert.match(result.stderr, /Stale task/);
-    assert.strictEqual(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"), before);
+    assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"), before);
 
     result = run(["dependency", "--project-root", ".", "--id", "DEP-MISSING", "--from", "REQ-NOT-THERE", "--to", "TSK-EXPORT", "--type", "REQUIRES", "--owner", "B"], root);
     assert.strictEqual(result.status, 2);
     assert.match(result.stderr, /missing from node/);
-    assert.strictEqual(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"), before);
+    assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"), before);
 
     fs.writeFileSync(path.join(root, "candidate.md"), "candidate");
     const preview = run(["doc-diff", "--project-root", ".", "--id", "ART-SOURCES", "--base-path", "docs/sources.md", "--content-file", "candidate.md", "--owner", "A"], root);
@@ -176,11 +176,11 @@ describe("ALN-004 deterministic closure", () => {
     assert.strictEqual(result.status, 0, result.stderr);
     const preview = JSON.parse(result.stdout);
     assert.deepEqual(preview.diff, [{ kind: "removed", text: "alpha" }, { kind: "added", text: "beta" }]);
-    const before = fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8");
+    const before = fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8");
     result = run(["doc-save", "--project-root", ".", "--id", "ART-SPEC", "--base-path", "docs/spec.md", "--content-file", "second.md", "--owner", "A", "--expected-revision", "0", "--expected-hash", "NEW"], root);
     assert.strictEqual(result.status, 2);
     assert.match(result.stderr, /stale revision/);
-    assert.strictEqual(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"), before);
+    assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"), before);
   });
 
   it("exports, verifies, imports and resumes a portable project package", () => {
@@ -217,10 +217,10 @@ describe("ALN-004 deterministic closure", () => {
     // revisions the recipient could not bring back and `doc-restore` answered
     // "History file for revision 1 not found" — true for the author, false for
     // whoever received the folder. Demonstrated in both ALN-005 pilots.
-    const sourceHistory = fs.readdirSync(path.join(root, ".beave", "history")).sort();
+    const sourceHistory = fs.readdirSync(path.join(root, ".plangonaut", "history")).sort();
     assert.ok(sourceHistory.length > 0, "the exporting project must have history to carry");
     assert.deepEqual(
-      fs.readdirSync(path.join(imported, ".beave", "history")).sort(),
+      fs.readdirSync(path.join(imported, ".plangonaut", "history")).sort(),
       sourceHistory,
       "every recorded revision must survive the handoff"
     );

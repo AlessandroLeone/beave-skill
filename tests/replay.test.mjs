@@ -22,11 +22,11 @@ import { ageProject } from "./older-engine.mjs";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(root, args, env = {}) {
+function plangonaut(root, args, env = {}) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `r${counter}-${Date.now()}`);
@@ -39,19 +39,19 @@ function beave(root, args, env = {}) {
 }
 
 function ok(root, args, env) {
-  const result = beave(root, args, env);
+  const result = plangonaut(root, args, env);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function refused(root, args) {
-  const result = beave(root, args);
+  const result = plangonaut(root, args);
   assert.notStrictEqual(result.status, 0, `expected ${args[0]} to be refused:\n${result.out}`);
   return result.out;
 }
 
 function project(t, name = "Replay") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-replay-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-replay-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(
     path.join(root, "owners.json"),
@@ -65,8 +65,8 @@ function project(t, name = "Replay") {
   return root;
 }
 
-const statePath = (root) => path.join(root, ".beave", "state.json");
-const eventsPath = (root) => path.join(root, ".beave", "events.jsonl");
+const statePath = (root) => path.join(root, ".plangonaut", "state.json");
+const eventsPath = (root) => path.join(root, ".plangonaut", "events.jsonl");
 const readState = (root) => JSON.parse(fs.readFileSync(statePath(root), "utf8"));
 
 function readEvents(root) {
@@ -151,7 +151,7 @@ test("a migrated project replays from the baseline it was given, and says what i
 
   const before = refused(root, ["replay", "--project-root", root]);
   assert.match(before, /NOT REPRODUCIBLE/);
-  assert.match(before, /beave baseline/);
+  assert.match(before, /plangonaut baseline/);
 
   ok(root, ["baseline", "--project-root", root, "--reason", "Upgraded from an engine that recorded digests only", "--owner", "Ada"]);
   const after = ok(root, ["replay", "--project-root", root]);
@@ -173,7 +173,7 @@ test("an event this engine cannot read stops the replay instead of being skipped
   writeEvents(root, events);
   const out = refused(root, ["replay", "--project-root", root]);
   assert.match(out, /event format 99/);
-  assert.match(out, /Upgrade Beave/);
+  assert.match(out, /Upgrade Plangonaut/);
 });
 
 test("a duplicated event is refused", (t) => {
@@ -241,7 +241,7 @@ test("a broken chain digest is refused even when every event is otherwise intact
   writeEvents(root, events);
   const out = refused(root, ["replay", "--project-root", root]);
   assert.match(out, /chain breaks/);
-  assert.match(out, /edited outside Beave/);
+  assert.match(out, /edited outside Plangonaut/);
 });
 
 // ---------------------------------------------------------------------------
@@ -274,14 +274,14 @@ test("an edited derived document is repaired from the state, not the other way r
   const root = project(t);
   ok(root, ["qa-ask", "--project-root", root, "--id", "QNA-0001", "--question", "How many loaves?", "--rationale", "Sizing", "--owner", "Ada"]);
   const view = path.join(root, "QUESTION_ANSWER_HISTORY.md");
-  fs.writeFileSync(view, "# Not what Beave wrote\n");
+  fs.writeFileSync(view, "# Not what Plangonaut wrote\n");
 
-  assert.match(refused(root, ["validate", "--project-root", root]), /edited outside Beave/);
+  assert.match(refused(root, ["validate", "--project-root", root]), /edited outside Plangonaut/);
   // The canonical source is intact, so Resume rebuilds the document and says so.
   const resumed = ok(root, ["resume", "--project-root", root]);
   assert.match(resumed, /derived view was regenerated/);
   assert.match(fs.readFileSync(view, "utf8"), /How many loaves\?/);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   // The history never moved: the document was rebuilt from it.
   assert.match(ok(root, ["replay", "--project-root", root]), /matches its history exactly/);
 });
@@ -319,7 +319,7 @@ test("repair rebuilds the state, keeps the old one, and leaves the project repro
 
   const repaired = ok(root, ["replay", "--project-root", root, "--repair"]);
   assert.match(repaired, /Rebuilt the state from/);
-  assert.match(repaired, /preserved at \.beave\/backups\//);
+  assert.match(repaired, /preserved at \.plangonaut\/backups\//);
 
   const after = readState(root);
   assert.strictEqual(after.decisions[0].title, "Bake weekly");
@@ -331,7 +331,7 @@ test("repair rebuilds the state, keeps the old one, and leaves the project repro
 
   // The repair is itself in the history, and the project replays through it.
   assert.match(ok(root, ["replay", "--project-root", root]), /matches its history exactly/);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   assert.ok(readEvents(root).some((event) => event.type === "STATE_REPAIRED_FROM_EVENTS"));
   assert.notStrictEqual(fs.readFileSync(statePath(root), "utf8"), original, "the revision moved on");
 });

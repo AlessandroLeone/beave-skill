@@ -29,11 +29,11 @@ import { fileURLToPath } from "node:url";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(cwd, args, env = {}) {
+function plangonaut(cwd, args, env = {}) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `ID${counter}-${Date.now()}`);
@@ -42,13 +42,13 @@ function beave(cwd, args, env = {}) {
 }
 
 function ok(cwd, args, env) {
-  const result = beave(cwd, args, env);
+  const result = plangonaut(cwd, args, env);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function scratch(t, name = "work") {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "beave-identity-"));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-identity-"));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   return path.join(base, name);
 }
@@ -69,7 +69,7 @@ function project(t, name = "Identity") {
 }
 
 const readEvents = (root) =>
-  fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
+  fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 
 // ---------------------------------------------------------------------------
 // The same operation, written differently
@@ -79,7 +79,7 @@ test("the same options in a different order are the same operation", (t) => {
   const root = project(t);
   ok(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Test", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-A"]);
 
-  const reordered = beave(root, ["decision", "--owner", "Ada", "--status", "APPROVED", "--title", "Test", "--id", "DEC-1", "--project-root", root, "--operation-id", "OP-A"]);
+  const reordered = plangonaut(root, ["decision", "--owner", "Ada", "--status", "APPROVED", "--title", "Test", "--id", "DEC-1", "--project-root", root, "--operation-id", "OP-A"]);
   assert.strictEqual(reordered.status, 0, reordered.out);
   assert.match(reordered.out, /Idempotent retry/);
   assert.strictEqual(readEvents(root).filter((event) => event.type === "DECISION_CREATED").length, 1);
@@ -91,7 +91,7 @@ test("the project spelled two ways is the same project", (t) => {
 
   // Run from inside the folder, with `.`, and with a trailing separator.
   for (const spelling of [".", `${root}${path.sep}`, root.replaceAll("\\", "/")]) {
-    const retry = beave(root, ["decision", "--project-root", spelling, "--id", "DEC-1", "--title", "Test", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-B"]);
+    const retry = plangonaut(root, ["decision", "--project-root", spelling, "--id", "DEC-1", "--title", "Test", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-B"]);
     assert.strictEqual(retry.status, 0, `${spelling}:\n${retry.out}`);
     assert.match(retry.out, /Idempotent retry/);
   }
@@ -107,7 +107,7 @@ test("a file at two equivalent paths is the same input; different content is not
   ok(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", first, "--owner", "Ada", "--operation-id", "OP-C"]);
 
   // Same bytes under another name: the content is the input, so this is a retry.
-  const sameContent = beave(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", second, "--owner", "Ada", "--operation-id", "OP-C"]);
+  const sameContent = plangonaut(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", second, "--owner", "Ada", "--operation-id", "OP-C"]);
   assert.strictEqual(sameContent.status, 0, sameContent.out);
   assert.match(sameContent.out, /Idempotent retry/);
 
@@ -116,14 +116,14 @@ test("a file at two equivalent paths is the same input; different content is not
    * bytes. It answered `Idempotent retry` and threw the new answer away.
    */
   fs.writeFileSync(first, "# A completely different answer\n");
-  const changed = beave(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", first, "--owner", "Ada", "--operation-id", "OP-C"]);
+  const changed = plangonaut(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", first, "--owner", "Ada", "--operation-id", "OP-C"]);
   assert.notStrictEqual(changed.status, 0, "a different file content passed as a repeat of the same operation");
   assert.match(changed.out, /already used with different input/);
 });
 
 test("a missing file is distinguished from another missing file", (t) => {
   const root = project(t);
-  const conflicting = beave(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", path.join(root, "nowhere.md"), "--owner", "Ada", "--operation-id", "OP-D"]);
+  const conflicting = plangonaut(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", path.join(root, "nowhere.md"), "--owner", "Ada", "--operation-id", "OP-D"]);
   // It fails for the ordinary reason — the file is not there — and not by
   // colliding with some other absent file.
   assert.notStrictEqual(conflicting.status, 0);
@@ -144,7 +144,7 @@ test("options that really differ are a conflict, not a retry", (t) => {
     ["a different status", ["--id", "DEC-1", "--title", "First", "--status", "PROPOSED", "--owner", "Ada"]],
     ["an extra option", ["--id", "DEC-1", "--title", "First", "--status", "APPROVED", "--owner", "Ada", "--expected-revision", "2"]],
   ]) {
-    const conflict = beave(root, ["decision", "--project-root", root, ...args, "--operation-id", "OP-E"]);
+    const conflict = plangonaut(root, ["decision", "--project-root", root, ...args, "--operation-id", "OP-E"]);
     assert.notStrictEqual(conflict.status, 0, `${what} was accepted as a repeat`);
     assert.match(conflict.out, /already used with different input/, what);
   }
@@ -165,7 +165,7 @@ test("the order inside a value is preserved, because only the caller knows if it
    * recorded in the order given. Nothing here sorts the inside of a value, so
    * the two stay distinct — a refusal, never a silent merge.
    */
-  const swapped = beave(root, ["doc-save", ...base, "--confirm-token", preview.confirmation_token, "--sources", "DEC-2,DEC-1", "--operation-id", "OP-F"]);
+  const swapped = plangonaut(root, ["doc-save", ...base, "--confirm-token", preview.confirmation_token, "--sources", "DEC-2,DEC-1", "--operation-id", "OP-F"]);
   assert.notStrictEqual(swapped.status, 0);
   assert.match(swapped.out, /already used with different input/);
 });
@@ -191,7 +191,7 @@ test("an operation recorded by the earlier engine is still recognised", (t) => {
    * The digest is recomputed the way that engine computed it — over the flags as
    * typed — so this is a record that engine could have produced.
    */
-  const eventsPath = path.join(root, ".beave", "events.jsonl");
+  const eventsPath = path.join(root, ".plangonaut", "events.jsonl");
   const lines = fs.readFileSync(eventsPath, "utf8").split(/\r?\n/).filter(Boolean);
   const aged = lines.map((line) => {
     const event = JSON.parse(line);
@@ -210,13 +210,13 @@ test("an operation recorded by the earlier engine is still recognised", (t) => {
 
   // The identical command, spelled identically, is still a no-op — which is what
   // stops it being applied a second time.
-  const retry = beave(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Legacy", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-H"]);
+  const retry = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Legacy", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-H"]);
   assert.strictEqual(retry.status, 0, retry.out);
   assert.match(retry.out, /Idempotent retry/);
   assert.strictEqual(readEvents(root).filter((event) => event.type === "DECISION_CREATED").length, 1);
 
   // And genuinely different input against that same old record still conflicts.
-  const conflict = beave(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Changed", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-H"]);
+  const conflict = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Changed", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-H"]);
   assert.notStrictEqual(conflict.status, 0);
   assert.match(conflict.out, /already used with different input/);
 });
@@ -227,13 +227,13 @@ test("a reordered retry works after a recovery, which is the case it exists for"
 
   // Killed after the event and before the state: the operation happened, the
   // project has not caught up, and the retry is the documented way out.
-  const killed = beave(root, args, { BEAVE_FAULT_AT: "after-events" });
+  const killed = plangonaut(root, args, { PLANGONAUT_FAULT_AT: "after-events" });
   assert.strictEqual(killed.status, 97, killed.out);
 
-  const retry = beave(root, ["risk", "--owner", "Ada", "--status", "IDENTIFIED", "--severity", "HIGH", "--title", "Oven fails", "--id", "RSK-1", "--project-root", ".", "--operation-id", "OP-I"]);
+  const retry = plangonaut(root, ["risk", "--owner", "Ada", "--status", "IDENTIFIED", "--severity", "HIGH", "--title", "Oven fails", "--id", "RSK-1", "--project-root", ".", "--operation-id", "OP-I"]);
   assert.strictEqual(retry.status, 0, retry.out);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root, "--verify"]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root, "--verify"]).status, 0);
   assert.strictEqual(readEvents(root).filter((event) => event.type === "RISK_CREATED").length, 1);
 });
 
@@ -257,7 +257,7 @@ test("a record from the earlier engine cannot certify a file-valued operation", 
    * one reading "ship on Friday", and the command exited 0 saying
    * `Idempotent retry: override already applied.`
    */
-  const eventsPath = path.join(root, ".beave", "events.jsonl");
+  const eventsPath = path.join(root, ".plangonaut", "events.jsonl");
   const lines = fs.readFileSync(eventsPath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
     const event = JSON.parse(line);
     if (event.type !== "MODULE_RECORDED") return line;
@@ -272,10 +272,10 @@ test("a record from the earlier engine cannot certify a file-valued operation", 
 
   // The same filename, entirely different text, the same operation id.
   fs.writeFileSync(answer, "ANSWER TWO: use MySQL instead. THIS IS THE CORRECTED ANSWER.\n");
-  const retried = beave(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", answer, "--owner", "Ada", "--operation-id", "OP-LEGACY"]);
+  const retried = plangonaut(root, ["record", "--project-root", root, "--module", "1", "--status", "CONFIRMED", "--answer-file", answer, "--owner", "Ada", "--operation-id", "OP-LEGACY"]);
 
   assert.notStrictEqual(retried.status, 0, "the corrected content was discarded and the command reported success");
-  assert.match(retried.out, /recorded by an earlier version of Beave/);
+  assert.match(retried.out, /recorded by an earlier version of Plangonaut/);
   assert.match(retried.out, /--answer-file/);
   assert.match(retried.out, /Nothing was written/);
 });
@@ -284,7 +284,7 @@ test("a legacy record with no file input is still recognised, and still conflict
   const root = project(t);
   ok(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Legacy", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-SCALAR"]);
 
-  const eventsPath = path.join(root, ".beave", "events.jsonl");
+  const eventsPath = path.join(root, ".plangonaut", "events.jsonl");
   const lines = fs.readFileSync(eventsPath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
     const event = JSON.parse(line);
     if (event.type !== "DECISION_CREATED") return line;
@@ -299,11 +299,11 @@ test("a legacy record with no file input is still recognised, and still conflict
 
   // Nothing here reads a file, so the older digest still says everything it
   // needs to: an identical retry is the no-op it always was.
-  const retry = beave(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Legacy", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-SCALAR"]);
+  const retry = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Legacy", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-SCALAR"]);
   assert.strictEqual(retry.status, 0, retry.out);
   assert.match(retry.out, /Idempotent retry/);
 
-  const conflict = beave(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Changed", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-SCALAR"]);
+  const conflict = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-1", "--title", "Changed", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-SCALAR"]);
   assert.notStrictEqual(conflict.status, 0);
   assert.match(conflict.out, /already used with different input/);
 });

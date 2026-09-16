@@ -21,11 +21,11 @@ import { ageProject } from "./older-engine.mjs";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(root, args, options = {}) {
+function plangonaut(root, args, options = {}) {
   counter += 1;
   const full = [...args];
   // Every mutation needs one; reads ignore it. Supplying it here keeps each test
@@ -41,20 +41,20 @@ function beave(root, args, options = {}) {
 }
 
 function ok(root, args) {
-  const result = beave(root, args);
+  const result = plangonaut(root, args);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function refused(root, args) {
-  const result = beave(root, args);
+  const result = plangonaut(root, args);
   assert.notStrictEqual(result.status, 0, `expected ${args[0]} to be refused, it succeeded:\n${result.out}`);
   return result.out;
 }
 
 /** A project with owners, ready for its first question. */
 function project(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-qa-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-qa-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(
     path.join(root, "owners.json"),
@@ -67,7 +67,7 @@ function project(t) {
   return root;
 }
 
-const state = (root) => JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+const state = (root) => JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
 const entry = (root, id) => state(root).interview_log.find((item) => item.id === id);
 const view = (root) => fs.readFileSync(path.join(root, "QUESTION_ANSWER_HISTORY.md"), "utf8");
 
@@ -323,7 +323,7 @@ test("the document alone carries the history, for a host with no CLI", (t) => {
   ]);
 
   // A semantic-only host reads this file and nothing else. It has to carry the
-  // question, the answer, what Beave understood, and the warning that it is
+  // question, the answer, what Plangonaut understood, and the warning that it is
   // derived — otherwise "recover semantically" means "guess".
   const document = view(root);
   for (const needed of [
@@ -331,7 +331,7 @@ test("the document alone carries the history, for a host with no CLI", (t) => {
     "Dispatchers and technicians.",
     "Two roles.",
     "derived view",
-    ".beave/events.jsonl",
+    ".plangonaut/events.jsonl",
   ]) {
     assert.ok(document.includes(needed), `the standalone document must carry: ${needed}`);
   }
@@ -348,13 +348,13 @@ test("a hand edit to the document is detected, and repaired without touching his
   const file = path.join(root, "QUESTION_ANSWER_HISTORY.md");
   fs.appendFileSync(file, "\nSomebody typed this by hand.\n");
 
-  const failed = beave(root, ["validate", "--project-root", root]);
+  const failed = plangonaut(root, ["validate", "--project-root", root]);
   assert.notStrictEqual(failed.status, 0);
-  assert.match(failed.out, /edited outside Beave/);
+  assert.match(failed.out, /edited outside Plangonaut/);
   assert.match(failed.out, /qa-log --project-root \. --regenerate/, "the refusal names the repair");
 
   ok(root, ["qa-log", "--project-root", root, "--regenerate"]);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   assert.strictEqual(entry(root, "QNA-0001").question, "Who uses this?", "the ledger was never in question");
 });
 
@@ -383,12 +383,12 @@ test("a history put out of order by hand is refused by validate", (t) => {
   ask(root, "1", "First?");
   ask(root, "2", "Second?");
 
-  const location = path.join(root, ".beave", "state.json");
+  const location = path.join(root, ".plangonaut", "state.json");
   const edited = JSON.parse(fs.readFileSync(location, "utf8"));
   edited.interview_log.reverse();
   fs.writeFileSync(location, JSON.stringify(edited, null, 2));
 
-  const out = beave(root, ["validate", "--project-root", root]);
+  const out = plangonaut(root, ["validate", "--project-root", root]);
   assert.notStrictEqual(out.status, 0);
   assert.match(out.out, /out of chronological order/);
 });
@@ -401,7 +401,7 @@ test("a project with no ledger is not described as one where nothing was asked",
   const root = project(t);
 
   // A project created before this feature existed: the fields are simply absent.
-  const location = path.join(root, ".beave", "state.json");
+  const location = path.join(root, ".plangonaut", "state.json");
   const legacy = JSON.parse(fs.readFileSync(location, "utf8"));
   delete legacy.interview_log;
   delete legacy.interview_log_since;
@@ -410,7 +410,7 @@ test("a project with no ledger is not described as one where nothing was asked",
   ageProject(root);
   fs.rmSync(path.join(root, "QUESTION_ANSWER_HISTORY.md"), { force: true });
 
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0, "a project without the ledger is still valid");
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0, "a project without the ledger is still valid");
 
   const resumed = ok(root, ["resume", "--project-root", root]);
   assert.match(resumed, /predates the interview ledger/);
@@ -453,7 +453,7 @@ test("the derived view is a pure function of the ledger and stays in step with i
 
   answer(root, "1", "Dispatchers.");
   assert.notStrictEqual(view(root), first, "and a new fact changes them");
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 
   // The digest recorded in state is the digest of the file on disk.
   const digest = state(root).interview_view.sha256;
@@ -494,7 +494,7 @@ test("a question cannot be opened while a human override is unreconciled", (t) =
     "qa-ask", "--project-root", root, "--id", "1", "--question", "Who uses this?",
     "--rationale", "Module 2.", "--owner", "Ada",
   ]);
-  assert.match(out, /reconcil/i, "the same rule `beave next` already applies to the catalog");
+  assert.match(out, /reconcil/i, "the same rule `plangonaut next` already applies to the catalog");
 });
 
 // ---------------------------------------------------------------------------
@@ -603,7 +603,7 @@ test("settling moves the recorded next action on, and keeps one a person wrote",
    */
   assert.match(state(root).exact_next_action, /QNA-0002/);
   const resumed = ok(root, ["resume", "--project-root", root]);
-  assert.doesNotMatch(resumed, /\*\*Start here\.\*\* Exact next action, as recorded: Run `beave next/);
+  assert.doesNotMatch(resumed, /\*\*Start here\.\*\* Exact next action, as recorded: Run `plangonaut next/);
   assert.match(resumed, /\*\*Start here\.\*\*[\s\S]*QNA-0002/);
 
   // A sentence a person wrote is still kept; the suggestion is reported instead.

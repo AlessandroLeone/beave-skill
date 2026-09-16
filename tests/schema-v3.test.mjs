@@ -6,7 +6,7 @@ import path from "node:path";
 import os from "node:os";
 import { execSync } from "node:child_process";
 
-const CLI_PATH = path.resolve("lib", "bin", "beave.js");
+const CLI_PATH = path.resolve("lib", "bin", "plangonaut.js");
 
 function runCli(args, cwd) {
   if (["record","override","reconcile","decision","requirement","task","dependency","risk","evidence","agent","checkpoint","gate","doc-save","doc-mark-deletion","doc-restore","doc-finalize"].includes(args[0]) && !args.includes("--operation-id")) args = [...args, "--operation-id", `OP-${crypto.randomUUID()}`];
@@ -21,14 +21,14 @@ function runCli(args, cwd) {
 
 describe("Schema v3 Ledgers", () => {
   it("initializes a valid v3 state", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-v3-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-v3-"));
     const ownersFile = path.join(root, "owners.json");
     fs.writeFileSync(ownersFile, JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
 
     const res = runCli(["init", "--project-root", ".", "--project-name", "TestV3", "--project-mode", "Genesis", "--interaction-mode", "Standard", "--owners-file", "owners.json", "--operation-id", "OP-init-schema-v3"], root);
     assert.strictEqual(res.status, 0);
 
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(state.schema_version, 3);
     assert.ok(Array.isArray(state.decisions));
     assert.ok(Array.isArray(state.tasks));
@@ -41,14 +41,14 @@ describe("Schema v3 Ledgers", () => {
   });
 
   it("detects dependency cycles", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-v3-cycle-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-v3-cycle-"));
     const ownersFile = path.join(root, "owners.json");
     fs.writeFileSync(ownersFile, JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
 
     runCli(["init", "--project-root", ".", "--project-name", "TestV3Cycle", "--project-mode", "Genesis", "--interaction-mode", "Standard", "--owners-file", "owners.json", "--operation-id", "OP-init-schema-cycle"], root);
 
     // artificially inject a cycle
-    const stateFile = path.join(root, ".beave", "state.json");
+    const stateFile = path.join(root, ".plangonaut", "state.json");
     const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     state.dependencies.push(
       { id: "DEP-001", from: "TSK-A", to: "TSK-B", type: "REQUIRES" },
@@ -63,9 +63,9 @@ describe("Schema v3 Ledgers", () => {
   });
 
   it("migrates from v2 to v3 correctly", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-v3-migrate-"));
-    const beaveDir = path.join(root, ".beave");
-    fs.mkdirSync(beaveDir);
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-v3-migrate-"));
+    const stateDir = path.join(root, ".plangonaut");
+    fs.mkdirSync(stateDir);
 
     const v2State = {
       schema_version: 2,
@@ -84,24 +84,24 @@ describe("Schema v3 Ledgers", () => {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    fs.writeFileSync(path.join(beaveDir, "state.json"), JSON.stringify(v2State));
-    fs.writeFileSync(path.join(beaveDir, "events.jsonl"), JSON.stringify({ event_id: "EVENT-V2", type: "INIT", at: v2State.updated_at, state_revision: 1 }) + "\n");
+    fs.writeFileSync(path.join(stateDir, "state.json"), JSON.stringify(v2State));
+    fs.writeFileSync(path.join(stateDir, "events.jsonl"), JSON.stringify({ event_id: "EVENT-V2", type: "INIT", at: v2State.updated_at, state_revision: 1 }) + "\n");
 
     const mig = runCli(["migrate", "--project-root", ".", "--operation-id", "OP-migrate-v2-v3"], root);
     assert.strictEqual(mig.status, 0);
 
-    const v3State = JSON.parse(fs.readFileSync(path.join(beaveDir, "state.json"), "utf8"));
+    const v3State = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
     assert.strictEqual(v3State.schema_version, 3);
     assert.ok(Array.isArray(v3State.decisions));
     assert.ok(Array.isArray(v3State.tasks));
-    const backups = fs.readdirSync(path.join(beaveDir, "backups"));
+    const backups = fs.readdirSync(path.join(stateDir, "backups"));
     assert.ok(backups.some((name) => name.startsWith("state.json.")));
     // `events.jsonl` is appended to, and this used to assert a copy of it existed.
     // A copy of an append-only file protects nothing — every prior byte is still
     // in the file afterwards — and copying the whole log on every mutation is why
-    // `.beave/backups` reached 104 MB against 220 KB of documents on the ALN-005
+    // `.plangonaut/backups` reached 104 MB against 220 KB of documents on the ALN-005
     // pilot A project. What matters is that the prior content survived.
-    const events = fs.readFileSync(path.join(beaveDir, "events.jsonl"), "utf8").trim().split(/\r?\n/).map(JSON.parse);
+    const events = fs.readFileSync(path.join(stateDir, "events.jsonl"), "utf8").trim().split(/\r?\n/).map(JSON.parse);
     assert.ok(events.length > 1, "the pre-migration events must still be there");
     // The v2 ledger opened with its own event type; whatever it was, the migration
     // appended after it rather than replacing it.

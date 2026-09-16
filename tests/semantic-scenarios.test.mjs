@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const CLI = path.resolve("lib/bin/beave.js");
+const CLI = path.resolve("lib/bin/plangonaut.js");
 
 function runCli(args, cwd) {
   if (["record","override","reconcile","decision","requirement","task","dependency","risk","evidence","agent","checkpoint","gate","doc-save","doc-mark-deletion","doc-restore","doc-finalize"].includes(args[0]) && !args.includes("--operation-id")) args = [...args, "--operation-id", `OP-${crypto.randomUUID()}`];
@@ -16,28 +16,28 @@ function runCli(args, cwd) {
 
 describe("IMP-006 Semantic Scenarios and Discovery Tests", () => {
   it("exports portable markdown containing the canonical source digest", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-semantic-1-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-semantic-1-"));
     const res = runCli(["export", "--target", "portable", "--output-dir", root], root);
     assert.strictEqual(res.status, 0);
     
-    const portableFile = path.join(root, "beave-portable.md");
+    const portableFile = path.join(root, "plangonaut-portable.md");
     assert.ok(fs.existsSync(portableFile));
     const content = fs.readFileSync(portableFile, "utf8");
     
     assert.ok(content.includes("<!-- Canonical source digest: "));
-    assert.ok(content.includes("# Beave — Portable Semantic Edition"));
+    assert.ok(content.includes("# Plangonaut — Portable Semantic Edition"));
   });
 
   it("installs an adapter and verifies its integrity", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-semantic-2-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-semantic-2-"));
     
     // Install codex locally
     let res = runCli(["install", "--target", "codex", "--scope", "project", "--project-root", root], root);
     assert.strictEqual(res.status, 0);
     
-    const dest = path.join(root, ".agents", "skills", "beave");
+    const dest = path.join(root, ".agents", "skills", "plangonaut");
     assert.ok(fs.existsSync(dest));
-    assert.ok(fs.existsSync(path.join(dest, "beave-adapter.json")));
+    assert.ok(fs.existsSync(path.join(dest, "plangonaut-adapter.json")));
     assert.ok(fs.existsSync(path.join(dest, "SKILL.md")));
     
     // Verify installation (should pass)
@@ -47,12 +47,12 @@ describe("IMP-006 Semantic Scenarios and Discovery Tests", () => {
   });
 
   it("rejects drift when a file in the installed skill is manually modified", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-semantic-3-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-semantic-3-"));
     
     // Install claude locally
     runCli(["install", "--target", "claude", "--scope", "project", "--project-root", root], root);
     
-    const dest = path.join(root, ".claude", "skills", "beave");
+    const dest = path.join(root, ".claude", "skills", "plangonaut");
     const skillMd = path.join(dest, "SKILL.md");
     
     // Manual modification (Drift)
@@ -82,7 +82,7 @@ describe("IMP-006 Semantic Scenarios and Discovery Tests", () => {
  */
 
 const SKILL_FILES = (() => {
-  const skillRoot = path.resolve("skills", "beave");
+  const skillRoot = path.resolve("skills", "plangonaut");
   const found = [];
   const visit = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -100,10 +100,10 @@ const SKILL_FILES = (() => {
 
 /** The Portable Edition: what a host with no CLI and no repository is given. */
 function portableEdition() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-semantic-protocol-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-semantic-protocol-"));
   const result = runCli(["export", "--target", "portable", "--output-dir", root], root);
   assert.strictEqual(result.status, 0, result.stderr);
-  return fs.readFileSync(path.join(root, "beave-portable.md"), "utf8");
+  return fs.readFileSync(path.join(root, "plangonaut-portable.md"), "utf8");
 }
 
 function statedIn(needle) {
@@ -182,14 +182,14 @@ describe("ALN-008 semantic protocol: what the dossier must teach", () => {
   it("keeps the forecast in one canonical place instead of copying counts into documents", () => {
     const portable = portableEdition();
     assert.ok(portable.includes("Never copy a count that will change into several documents"));
-    const template = fs.readFileSync(path.resolve("skills", "beave", "assets", "project-state-template.md"), "utf8");
+    const template = fs.readFileSync(path.resolve("skills", "plangonaut", "assets", "project-state-template.md"), "utf8");
     assert.match(template, /## Operational forecast/, "the state document is the canonical place in Semantic-only");
     assert.match(template, /Change since the previous forecast, and its cause/);
   });
 
   it("documents re-record as a command, not only as the remedy inside a refusal", () => {
     // OD-012 was exactly this: a refusal naming an operation the dossier had never
-    // heard of. An AI adopting Beave must be able to find it before it is refused.
+    // heard of. An AI adopting Plangonaut must be able to find it before it is refused.
     const portable = portableEdition();
     assert.ok(portable.includes("re-record --project-root . --kind override|gate"));
     assert.ok(portable.includes("--reason"), "the reason is the only account of why the change was allowed");
@@ -226,7 +226,7 @@ describe("ALN-008 semantic protocol: what the dossier must teach", () => {
 
   it("tells the agent what to do when a derived signal contradicts the state it declared", () => {
     // Left by the skill agent for the lead, deliberately: the engine half was
-    // being written at the same time. `beave forecast` records the caller's cycle
+    // being written at the same time. `plangonaut forecast` records the caller's cycle
     // state, records a contradicting signal beside it, and says so — and an
     // engine that speaks to nobody is the same as an engine that says nothing.
     const portable = portableEdition();

@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
  * collision and drew the right conclusion from it: an overlap that was never
  * forced is not evidence of safety.
  *
- * So nothing here is probabilistic. `BEAVE_TEST_SYNC` names a path: once a
+ * So nothing here is probabilistic. `PLANGONAUT_TEST_SYNC` names a path: once a
  * process is inside the critical section it writes `<path>.ready` and waits for
  * `<path>.go`. The test starts the first process, waits for `.ready` — at which
  * point the first is provably holding the lock — starts the second, observes
@@ -27,11 +27,11 @@ import { fileURLToPath } from "node:url";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(root, args, env = {}) {
+function plangonaut(root, args, env = {}) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `L${counter}-${Date.now()}`);
@@ -44,13 +44,13 @@ function beave(root, args, env = {}) {
 }
 
 function ok(root, args, env) {
-  const result = beave(root, args, env);
+  const result = plangonaut(root, args, env);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function project(t, name = "Locked") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-lock-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-lock-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(
     path.join(root, "owners.json"),
@@ -64,9 +64,9 @@ function project(t, name = "Locked") {
   return root;
 }
 
-const lockPath = (root) => path.join(root, ".beave", "lock.json");
-const statePath = (root) => path.join(root, ".beave", "state.json");
-const eventsPath = (root) => path.join(root, ".beave", "events.jsonl");
+const lockPath = (root) => path.join(root, ".plangonaut", "lock.json");
+const statePath = (root) => path.join(root, ".plangonaut", "state.json");
+const eventsPath = (root) => path.join(root, ".plangonaut", "events.jsonl");
 const readState = (root) => JSON.parse(fs.readFileSync(statePath(root), "utf8"));
 const readEvents = (root) =>
   fs.readFileSync(eventsPath(root), "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
@@ -89,7 +89,7 @@ function waitForFile(file, timeoutMs = 30_000) {
 function startHolding(t, root, args, marker, env = {}) {
   const child = spawn(process.execPath, [CLI, ...args], {
     cwd: root,
-    env: { ...process.env, BEAVE_TEST_SYNC: marker, ...env },
+    env: { ...process.env, PLANGONAUT_TEST_SYNC: marker, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
@@ -135,11 +135,11 @@ test("only one process is inside the critical section, and the lock says who", a
 
   // The second process does not get in. It waits, then says exactly what it is
   // waiting behind — the wait is bounded, so this test cannot hang.
-  const second = beave(root, [
+  const second = plangonaut(root, [
     "decision", "--project-root", root, "--id", "DEC-0002", "--title", "Second", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-SECOND",
   ]);
   assert.notStrictEqual(second.status, 0, "the second process entered while the first held the lock");
-  assert.match(second.out, /in use by another Beave process/);
+  assert.match(second.out, /in use by another Plangonaut process/);
   assert.match(second.out, new RegExp(`process ${first.child.pid}`));
   assert.match(second.out, /Nothing was changed/);
 
@@ -159,7 +159,7 @@ test("the second process succeeds once the first has finished", async (t) => {
     "decision", "--project-root", root, "--id", "DEC-0001", "--title", "First", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-A",
   ], sync);
 
-  const refusedWhileHeld = beave(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "Second", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-B"]);
+  const refusedWhileHeld = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "Second", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-B"]);
   assert.notStrictEqual(refusedWhileHeld.status, 0);
 
   first.release();
@@ -182,7 +182,7 @@ test("two processes cannot apply the same revision, and no event is lost", async
   ], sync);
 
   // The second reads the same revision the first is about to advance past.
-  const blocked = beave(root, ["risk", "--project-root", root, "--id", "RSK-0002", "--title", "Flour shortage", "--severity", "MEDIUM", "--status", "IDENTIFIED", "--owner", "Ada", "--operation-id", "OP-R2"]);
+  const blocked = plangonaut(root, ["risk", "--project-root", root, "--id", "RSK-0002", "--title", "Flour shortage", "--severity", "MEDIUM", "--status", "IDENTIFIED", "--owner", "Ada", "--operation-id", "OP-R2"]);
   assert.notStrictEqual(blocked.status, 0);
 
   first.release();
@@ -197,8 +197,8 @@ test("two processes cannot apply the same revision, and no event is lost", async
   }
   assert.strictEqual(revisions[revisions.length - 1], before + 2, "an event was lost");
   assert.strictEqual(readState(root).risks.length, 2);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -214,13 +214,13 @@ test("a read that can trigger recovery waits behind the lock, and one that canno
 
   // `status` loads the state, and loading runs recovery, so it is a writer's
   // neighbour whatever its name suggests.
-  const status = beave(root, ["status", "--project-root", root]);
+  const status = plangonaut(root, ["status", "--project-root", root]);
   assert.notStrictEqual(status.status, 0, "a command that can recover entered while the project was locked");
-  assert.match(status.out, /in use by another Beave process/);
+  assert.match(status.out, /in use by another Plangonaut process/);
 
   // `replay --verify` deliberately never recovers, so it is free to read. It
   // reports what it saw rather than pretending the project is idle.
-  const verified = beave(root, ["replay", "--project-root", root, "--verify"]);
+  const verified = plangonaut(root, ["replay", "--project-root", root, "--verify"]);
   assert.strictEqual(verified.status, 0, verified.out);
 
   first.release();
@@ -248,8 +248,8 @@ test("a killed process leaves a lock that the next command can take over, and sa
   ok(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "After the kill", "--status", "APPROVED", "--owner", "Ada"]);
   assert.strictEqual(readState(root).decisions.length, 1);
   assert.ok(!fs.existsSync(lockPath(root)), "the takeover did not release its own lock");
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 });
 
 test("a lock held by a live process is never taken, with or without --force", async (t) => {
@@ -263,7 +263,7 @@ test("a lock held by a live process is never taken, with or without --force", as
   assert.match(inspected, /still running on this machine/);
   assert.match(inspected, /Nothing was changed/);
 
-  const forced = beave(root, ["unlock", "--project-root", root, "--force"]);
+  const forced = plangonaut(root, ["unlock", "--project-root", root, "--force"]);
   assert.notStrictEqual(forced.status, 0, "--force took a lock from a running process");
   assert.match(forced.out, /will not take a lock from a live process/);
   assert.ok(fs.existsSync(lockPath(root)), "the lock was removed anyway");
@@ -285,10 +285,10 @@ test("a lock from another host, or one that cannot be read, takes an explicit re
   };
   fs.writeFileSync(lockPath(root), `${JSON.stringify(remote, null, 2)}\n`);
 
-  const refusedRemote = beave(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada"]);
+  const refusedRemote = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada"]);
   assert.notStrictEqual(refusedRemote.status, 0);
   assert.match(refusedRemote.out, /locked by another machine/);
-  assert.match(refusedRemote.out, /beave unlock/);
+  assert.match(refusedRemote.out, /plangonaut unlock/);
   assert.ok(fs.existsSync(lockPath(root)), "a remote lock was taken automatically");
 
   ok(root, ["unlock", "--project-root", root, "--force"]);
@@ -304,7 +304,7 @@ test("a lock from another host, or one that cannot be read, takes an explicit re
    * automatic answer, so the decision goes to a person.
    */
   fs.writeFileSync(lockPath(root), "this is not json\n");
-  const refusedUnreadable = beave(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "y", "--status", "APPROVED", "--owner", "Ada"]);
+  const refusedUnreadable = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "y", "--status", "APPROVED", "--owner", "Ada"]);
   assert.notStrictEqual(refusedUnreadable.status, 0);
   assert.match(refusedUnreadable.out, /lock cannot be read/);
   assert.match(refusedUnreadable.out, /neither will/);
@@ -314,7 +314,7 @@ test("a lock from another host, or one that cannot be read, takes an explicit re
   assert.match(inspected, /cannot tell what holds it/);
   assert.match(inspected, /--force will not change it either/);
 
-  const forced = beave(root, ["unlock", "--project-root", root, "--force"]);
+  const forced = plangonaut(root, ["unlock", "--project-root", root, "--force"]);
   assert.notStrictEqual(forced.status, 0, "--force removed a lock nobody could read");
   assert.match(forced.out, /cannot tell whether a process is holding it/);
   assert.ok(fs.existsSync(lockPath(root)), "the unreadable lock was removed anyway");
@@ -322,7 +322,7 @@ test("a lock from another host, or one that cannot be read, takes an explicit re
   // The way out the message names is the one that works.
   fs.rmSync(lockPath(root));
   ok(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "y", "--status", "APPROVED", "--owner", "Ada"]);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
 });
 
 test("a lock whose pid is not a number is never treated as an abandoned one", (t) => {
@@ -340,9 +340,9 @@ test("a lock whose pid is not a number is never treated as an abandoned one", (t
   // A numeric string is a pid: it is read as one, the process is found alive,
   // and the lock is not taken. It used to fail `Number.isInteger` and be called
   // dead.
-  const blocked = beave(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "y", "--status", "APPROVED", "--owner", "Ada"]);
+  const blocked = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "y", "--status", "APPROVED", "--owner", "Ada"]);
   assert.notStrictEqual(blocked.status, 0, "the lock was taken from a live process");
-  assert.match(blocked.out, /in use by another Beave process/);
+  assert.match(blocked.out, /in use by another Plangonaut process/);
   assert.ok(fs.existsSync(lockPath(root)), "the lock was removed");
 
   first.release();
@@ -363,14 +363,14 @@ test("a lock whose pid cannot be read at all is refused rather than assumed dead
   fs.writeFileSync(lockPath(root), `${JSON.stringify(nonsense, null, 2)}
 `);
 
-  const refusedRun = beave(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada"]);
+  const refusedRun = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada"]);
   assert.notStrictEqual(refusedRun.status, 0, "a lock with an unreadable holder was taken");
   assert.match(refusedRun.out, /does not say which process holds it/);
   assert.match(refusedRun.out, /delete that file yourself/);
   assert.ok(fs.existsSync(lockPath(root)));
 
   // And `--force` will not do it either, for the same reason.
-  const forced = beave(root, ["unlock", "--project-root", root, "--force"]);
+  const forced = plangonaut(root, ["unlock", "--project-root", root, "--force"]);
   assert.notStrictEqual(forced.status, 0);
   assert.ok(fs.existsSync(lockPath(root)));
 
@@ -380,14 +380,14 @@ test("a lock whose pid cannot be read at all is refused rather than assumed dead
 
 test("the lock does not remove anything it did not write", (t) => {
   const root = project(t);
-  const bystander = path.join(root, ".beave", "something-a-user-left.txt");
-  fs.writeFileSync(bystander, "not Beave's\n");
+  const bystander = path.join(root, ".plangonaut", "something-a-user-left.txt");
+  fs.writeFileSync(bystander, "not Plangonaut's\n");
   const dead = { lock_id: "x", pid: 999_999, host: os.hostname(), at: "2026-09-12T00:00:00.000Z", command: "decision", operation_id: null, observed_revision: null };
   fs.writeFileSync(lockPath(root), `${JSON.stringify(dead, null, 2)}\n`);
 
   ok(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada"]);
   assert.ok(fs.existsSync(bystander), "a file the engine did not write was removed");
-  assert.strictEqual(fs.readFileSync(bystander, "utf8"), "not Beave's\n");
+  assert.strictEqual(fs.readFileSync(bystander, "utf8"), "not Plangonaut's\n");
 });
 
 test("a kill really does leave the lock behind, which is what makes the takeover rules matter", async (t) => {
@@ -408,8 +408,8 @@ test("a kill really does leave the lock behind, which is what makes the takeover
 
   // The next command takes it over, because that PID is certainly gone.
   ok(root, ["decision", "--project-root", root, "--id", "DEC-0002", "--title", "After", "--status", "APPROVED", "--owner", "Ada"]);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   assert.ok(!fs.existsSync(lockPath(root)));
 });
 
@@ -428,7 +428,7 @@ test("a kill really does leave the lock behind, which is what makes the takeover
  * mutual exclusion, not the absence of a lost update", and asked for a second
  * synchronisation point after the revision is read.
  *
- * There is one now, `BEAVE_TEST_SYNC_AT=read`, and with `BEAVE_TEST_UNSAFE_NO_LOCK`
+ * There is one now, `PLANGONAUT_TEST_SYNC_AT=read`, and with `PLANGONAUT_TEST_UNSAFE_NO_LOCK`
  * the lock can be taken away so the damage can be produced on purpose. These two
  * tests are a pair: the first is the counter-example, the second is the same
  * choreography with the lock back.
@@ -442,15 +442,15 @@ test("without the lock, two writers in one window destroy each other's work", as
   // A reads the revision it will build on, and stops inside the window.
   const first = startHolding(t, root, [
     "decision", "--project-root", root, "--id", "DEC-0001", "--title", "A", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-LU-A",
-  ], sync, { BEAVE_TEST_SYNC_AT: "read", BEAVE_TEST_UNSAFE_NO_LOCK: "1" });
+  ], sync, { PLANGONAUT_TEST_SYNC_AT: "read", PLANGONAUT_TEST_UNSAFE_NO_LOCK: "1" });
   assert.ok(!fs.existsSync(lockPath(root)), "the seam did not actually remove the lock");
 
   // B runs the whole operation while A is in there, and succeeds.
-  const second = beave(root, [
+  const second = plangonaut(root, [
     "decision", "--project-root", root, "--id", "DEC-0002", "--title", "B", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-LU-B",
-  ], { BEAVE_TEST_UNSAFE_NO_LOCK: "1" });
+  ], { PLANGONAUT_TEST_UNSAFE_NO_LOCK: "1" });
   assert.strictEqual(second.status, 0, second.out);
-  assert.match(second.out, /BEAVE_TEST_UNSAFE_NO_LOCK is set/);
+  assert.match(second.out, /PLANGONAUT_TEST_UNSAFE_NO_LOCK is set/);
 
   first.release();
   const finished = await first.wait();
@@ -470,9 +470,9 @@ test("without the lock, two writers in one window destroy each other's work", as
   assert.notDeepStrictEqual(revisions, [...new Set(revisions)], "no revision was reused, so no update was lost");
 
   // And both commands that judge a project say so.
-  const validated = beave(root, ["validate", "--project-root", root]);
+  const validated = plangonaut(root, ["validate", "--project-root", root]);
   assert.strictEqual(validated.status, 2, validated.out);
-  const replayed = beave(root, ["replay", "--project-root", root, "--verify"]);
+  const replayed = plangonaut(root, ["replay", "--project-root", root, "--verify"]);
   assert.strictEqual(replayed.status, 2, `replay accepted a history holding a lost update:
 ${replayed.out}`);
   assert.match(replayed.out, /the revision does not advance/);
@@ -486,14 +486,14 @@ test("with the lock, the same choreography cannot start", async (t) => {
   // Identical to the test above in every respect but one: the lock is there.
   const first = startHolding(t, root, [
     "decision", "--project-root", root, "--id", "DEC-0001", "--title", "A", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-OK-A",
-  ], sync, { BEAVE_TEST_SYNC_AT: "read" });
+  ], sync, { PLANGONAUT_TEST_SYNC_AT: "read" });
   assert.ok(fs.existsSync(lockPath(root)), "no lock was taken");
 
-  const blocked = beave(root, [
+  const blocked = plangonaut(root, [
     "decision", "--project-root", root, "--id", "DEC-0002", "--title", "B", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-OK-B",
   ]);
   assert.notStrictEqual(blocked.status, 0, "the second writer entered the window the first was inside");
-  assert.match(blocked.out, /in use by another Beave process/);
+  assert.match(blocked.out, /in use by another Plangonaut process/);
 
   first.release();
   assert.strictEqual((await first.wait()).status, 0);
@@ -504,8 +504,8 @@ test("with the lock, the same choreography cannot start", async (t) => {
   assert.strictEqual(state.revision, before + 2);
   const revisions = readEvents(root).map((event) => Number(event.state_revision));
   assert.deepStrictEqual(revisions, [...new Set(revisions)], "a revision was applied twice");
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root, "--verify"]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root, "--verify"]).status, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -557,17 +557,17 @@ test("a lock that is genuinely empty is still refused, and says the same thing",
   fs.writeFileSync(lockPath(root), "");
 
   // Patience is bounded: nothing ever fills this one, and the answer is the
-  // answer it always was -- Beave will not reason about a file it cannot read.
+  // answer it always was -- Plangonaut will not reason about a file it cannot read.
   const started = Date.now();
-  const refused = beave(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Blocked", "--status", "APPROVED", "--owner", "Ada"]);
+  const refused = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Blocked", "--status", "APPROVED", "--owner", "Ada"]);
   assert.notStrictEqual(refused.status, 0);
   assert.match(refused.out, /locked and the lock cannot be read/);
   assert.ok(Date.now() - started < 20_000, "the patient read did not give up");
 
-  const reported = beave(root, ["unlock", "--project-root", root]);
+  const reported = plangonaut(root, ["unlock", "--project-root", root]);
   assert.match(reported.out, /unreadable/);
-  const forced = beave(root, ["unlock", "--project-root", root, "--force"]);
-  assert.notStrictEqual(forced.status, 0, "--force removed a lock Beave cannot read");
+  const forced = plangonaut(root, ["unlock", "--project-root", root, "--force"]);
+  assert.notStrictEqual(forced.status, 0, "--force removed a lock Plangonaut cannot read");
   assert.ok(fs.existsSync(lockPath(root)), "the unreadable lock was removed anyway");
 });
 
@@ -587,14 +587,14 @@ test("a lock with no host is not a lock from another machine", (t) => {
    */
   fs.writeFileSync(lockPath(root), JSON.stringify({ lock_id: "x", pid: process.pid, at: new Date().toISOString(), command: "decision" }));
 
-  const reported = beave(root, ["unlock", "--project-root", root]);
+  const reported = plangonaut(root, ["unlock", "--project-root", root]);
   assert.match(reported.out, /does not say which machine holds it/);
-  const forced = beave(root, ["unlock", "--project-root", root, "--force"]);
+  const forced = plangonaut(root, ["unlock", "--project-root", root, "--force"]);
   assert.notStrictEqual(forced.status, 0, "--force released a lock that names no machine");
   assert.ok(fs.existsSync(lockPath(root)), "the lock was removed anyway");
 
   // And a command arriving at that lock does not take it over either.
-  const refused = beave(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Blocked", "--status", "APPROVED", "--owner", "Ada"]);
+  const refused = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Blocked", "--status", "APPROVED", "--owner", "Ada"]);
   assert.notStrictEqual(refused.status, 0);
   assert.ok(fs.existsSync(lockPath(root)));
 });

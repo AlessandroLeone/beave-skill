@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const CLI = path.resolve("lib/bin/beave.js");
+const CLI = path.resolve("lib/bin/plangonaut.js");
 
 function runCli(args, cwd) {
   if (["record","override","reconcile","decision","requirement","task","dependency","risk","evidence","agent","checkpoint","gate","doc-save","doc-mark-deletion","doc-restore","doc-finalize"].includes(args[0]) && !args.includes("--operation-id")) args = [...args, "--operation-id", `OP-${crypto.randomUUID()}`];
@@ -16,7 +16,7 @@ function runCli(args, cwd) {
 
 describe("Transactions and Gates (IMP-004)", () => {
   it("enforces G0-G12 gates sequentially", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-gates-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-gates-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     
     // Init sets current_gate to G1
@@ -36,12 +36,12 @@ describe("Transactions and Gates (IMP-004)", () => {
     res = runCli(["gate", "--project-root", ".", "--id", "G1", "--status", "PASSED", "--evidence-file", "evidence.md", "--owner", "A"], root);
     assert.strictEqual(res.status, 0);
 
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(state.current_gate, "G2");
   });
 
   it("checks idempotency and prevents duplicate operations", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-idempotent-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-idempotent-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     runCli(["init", "--project-root", ".", "--project-name", "IdemTest", "--project-mode", "Genesis", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-idempotency"], root);
     
@@ -51,19 +51,19 @@ describe("Transactions and Gates (IMP-004)", () => {
     // First call succeeds
     let res = runCli(args, root);
     assert.strictEqual(res.status, 0);
-    const rev1 = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8")).revision;
+    const rev1 = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8")).revision;
 
     // Second call is idempotent
     res = runCli(args, root);
     assert.strictEqual(res.status, 0);
     assert.ok(res.stdout.includes("Idempotent retry: override already applied"));
-    const rev2 = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8")).revision;
+    const rev2 = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8")).revision;
     
     assert.strictEqual(rev1, rev2);
   });
   
   it("strictly blocks operations when needs_reconciliation is true", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-blocked-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-blocked-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     runCli(["init", "--project-root", ".", "--project-name", "BlockedTest", "--project-mode", "Genesis", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-blocked"], root);
     

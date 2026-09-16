@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
  * sequence. These tests kill the process at each point in that sequence and then
  * ask the next command what it finds.
  *
- * The kill is a real one. `BEAVE_FAULT_AT` makes the engine call `process.exit`,
+ * The kill is a real one. `PLANGONAUT_FAULT_AT` makes the engine call `process.exit`,
  * so no `finally` runs, no rollback runs, nothing is cleaned up — which is the
  * whole point: a test that unwinds the stack is testing exception handling, not
  * interruption. Each case then asserts the four things that actually matter: the
@@ -25,11 +25,11 @@ import { fileURLToPath } from "node:url";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(root, args, env = {}) {
+function plangonaut(root, args, env = {}) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `x${counter}-${Date.now()}`);
@@ -42,13 +42,13 @@ function beave(root, args, env = {}) {
 }
 
 function ok(root, args, env) {
-  const result = beave(root, args, env);
+  const result = plangonaut(root, args, env);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function project(t, name = "Faults") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-txn-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-txn-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.writeFileSync(
     path.join(root, "owners.json"),
@@ -62,15 +62,15 @@ function project(t, name = "Faults") {
   return root;
 }
 
-const statePath = (root) => path.join(root, ".beave", "state.json");
-const eventsPath = (root) => path.join(root, ".beave", "events.jsonl");
+const statePath = (root) => path.join(root, ".plangonaut", "state.json");
+const eventsPath = (root) => path.join(root, ".plangonaut", "events.jsonl");
 const readState = (root) => JSON.parse(fs.readFileSync(statePath(root), "utf8"));
 const readEvents = (root) =>
   fs.readFileSync(eventsPath(root), "utf8").split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 
 /** The crash the engine performs when the label is armed. */
 function crashAt(root, label, args) {
-  const result = beave(root, args, { BEAVE_FAULT_AT: label });
+  const result = plangonaut(root, args, { PLANGONAUT_FAULT_AT: label });
   assert.strictEqual(result.status, 97, `the fault at ${label} did not fire:\n${result.out}`);
   return result;
 }
@@ -83,10 +83,10 @@ function crashAt(root, label, args) {
  * reads or writes the project.
  */
 function assertConsistent(root) {
-  const validated = beave(root, ["validate", "--project-root", root]);
+  const validated = plangonaut(root, ["validate", "--project-root", root]);
   assert.strictEqual(validated.status, 0, `the project did not come back valid:\n${validated.out}`);
 
-  const replayed = beave(root, ["replay", "--project-root", root]);
+  const replayed = plangonaut(root, ["replay", "--project-root", root]);
   assert.strictEqual(replayed.status, 0, `the state does not match its history:\n${replayed.out}`);
 
   const events = readEvents(root);
@@ -100,7 +100,7 @@ function assertConsistent(root) {
   assert.strictEqual(readState(root).revision, revisions[revisions.length - 1], "the state is not at the revision its last event records");
 
   // Nothing may be left claiming to be in progress.
-  const transactions = path.join(root, ".beave", "transactions");
+  const transactions = path.join(root, ".plangonaut", "transactions");
   const open = fs.existsSync(transactions) ? fs.readdirSync(transactions) : [];
   assert.deepStrictEqual(open, [], "an interrupted transaction was left behind");
   return { events, state: readState(root) };
@@ -169,7 +169,7 @@ test("the same operation id retried after a crash applies once, and different in
   crashAt(root, "after-events", args);
 
   // Recovery completed it, so the retry must be a no-op rather than a second one.
-  const retry = beave(root, args);
+  const retry = plangonaut(root, args);
   assert.strictEqual(retry.status, 0, retry.out);
   const { state, events } = assertConsistent(root);
   assert.strictEqual(state.decisions.length, 1);
@@ -177,7 +177,7 @@ test("the same operation id retried after a crash applies once, and different in
 
   // The same id with different input is a different operation wearing the same
   // name, and is refused rather than silently recorded as the first one.
-  const conflicting = beave(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Something else", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-RETRY"]);
+  const conflicting = plangonaut(root, ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Something else", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-RETRY"]);
   assert.notStrictEqual(conflicting.status, 0);
   assert.match(conflicting.out, /already used with different input/);
   assert.strictEqual(readState(root).decisions[0].title, "Bake weekly");
@@ -212,7 +212,7 @@ test("a crash during a governed save leaves neither a half-written document nor 
   // the two revisions won is the journal's business, not the user's.
   const recorded = path.join(root, artifact.working_path);
   assert.ok(fs.existsSync(recorded), `the ledger names ${artifact.working_path}, which is not there`);
-  const history = beave(root, ["doc-history", "--project-root", root, "--id", "ART-0001"]);
+  const history = plangonaut(root, ["doc-history", "--project-root", root, "--id", "ART-0001"]);
   assert.strictEqual(history.status, 0, history.out);
 });
 
@@ -245,18 +245,18 @@ test("a receipt is left for every recovery, and it says which way it went", (t) 
   const undone = project(t);
   crashAt(undone, "after-journal", ["decision", "--project-root", undone, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-A"]);
   ok(undone, ["validate", "--project-root", undone]);
-  const undoneReceipts = fs.readdirSync(path.join(undone, ".beave", "recovery"));
+  const undoneReceipts = fs.readdirSync(path.join(undone, ".plangonaut", "recovery"));
   assert.strictEqual(undoneReceipts.length, 1);
   assert.match(undoneReceipts[0], /\.rolled-back\.json$/);
-  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(undone, ".beave", "recovery", undoneReceipts[0]), "utf8")).outcome, "ABORTED");
+  assert.strictEqual(JSON.parse(fs.readFileSync(path.join(undone, ".plangonaut", "recovery", undoneReceipts[0]), "utf8")).outcome, "ABORTED");
 
   const completed = project(t);
   crashAt(completed, "after-events", ["decision", "--project-root", completed, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-B"]);
   ok(completed, ["validate", "--project-root", completed]);
-  const completedReceipts = fs.readdirSync(path.join(completed, ".beave", "recovery"));
+  const completedReceipts = fs.readdirSync(path.join(completed, ".plangonaut", "recovery"));
   assert.strictEqual(completedReceipts.length, 1);
   assert.match(completedReceipts[0], /\.recovered\.json$/);
-  const receipt = JSON.parse(fs.readFileSync(path.join(completed, ".beave", "recovery", completedReceipts[0]), "utf8"));
+  const receipt = JSON.parse(fs.readFileSync(path.join(completed, ".plangonaut", "recovery", completedReceipts[0]), "utf8"));
   assert.strictEqual(receipt.outcome, "RECOVERED");
   assert.ok(Array.isArray(receipt.actions));
 });
@@ -301,7 +301,7 @@ for (const label of AFTER_THE_EVENT) {
      * while `state.gates` was empty and the event was in the log: a success
      * reported over a project that `replay` called diverged in the same second.
      */
-    const retry = beave(root, args);
+    const retry = plangonaut(root, args);
     assert.strictEqual(retry.status, 0, retry.out);
     const { state, events } = assertConsistent(root);
     assert.strictEqual(state.gates.length, 1, "the retry reported success over a state that had not caught up");
@@ -317,7 +317,7 @@ for (const label of BEFORE_THE_EVENT) {
 
     // This used to recover *underneath* the retry and then fail on preconditions
     // the recovery had just satisfied: `Missing required option --expected-revision`.
-    const retry = beave(root, args);
+    const retry = plangonaut(root, args);
     assert.strictEqual(retry.status, 0, `a retry with identical input must be a no-op:\n${retry.out}`);
     assert.match(retry.out, /Idempotent retry/);
     const { state, events } = assertConsistent(root);
@@ -339,7 +339,7 @@ test("a retry after an interrupted settlement keeps the next question it promise
   ];
   crashAt(root, "after-events", settle);
 
-  const retry = beave(root, settle);
+  const retry = plangonaut(root, settle);
   assert.strictEqual(retry.status, 0, retry.out);
   const { state } = assertConsistent(root);
   assert.ok(state.interview_log[0].consequences_recorded_at, "the settlement was lost by the retry");
@@ -351,7 +351,7 @@ test("a journal past the point of no return with nothing staged changes nothing 
   const root = project(t);
   crashAt(root, "after-staged", ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "Bake weekly", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-DEC"]);
 
-  const directory = path.join(root, ".beave", "transactions", fs.readdirSync(path.join(root, ".beave", "transactions"))[0]);
+  const directory = path.join(root, ".plangonaut", "transactions", fs.readdirSync(path.join(root, ".plangonaut", "transactions"))[0]);
   fs.rmSync(path.join(directory, "staged-state.json"));
 
   const eventsBefore = fs.readFileSync(eventsPath(root), "utf8");
@@ -363,7 +363,7 @@ test("a journal past the point of no return with nothing staged changes nothing 
    * raw ENOENT with no message and no way out. The contract says it stops, names
    * the directory and changes nothing; now it does.
    */
-  const refusedRun = beave(root, ["validate", "--project-root", root]);
+  const refusedRun = plangonaut(root, ["validate", "--project-root", root]);
   assert.notStrictEqual(refusedRun.status, 0);
   assert.match(refusedRun.out, /can neither be completed nor safely undone/);
   assert.match(refusedRun.out, /transactions/);
@@ -372,7 +372,7 @@ test("a journal past the point of no return with nothing staged changes nothing 
 
   // And the way out the message names actually works.
   fs.rmSync(directory, { recursive: true, force: true });
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 });
 
 test("a state file that is gone is rebuilt from the history, which is the case this is for", (t) => {
@@ -381,10 +381,10 @@ test("a state file that is gone is rebuilt from the history, which is the case t
   fs.rmSync(statePath(root));
 
   // Every command used to die on a raw ENOENT here, including the repair.
-  const told = beave(root, ["validate", "--project-root", root]);
+  const told = plangonaut(root, ["validate", "--project-root", root]);
   assert.notStrictEqual(told.status, 0);
   assert.match(told.out, /state\.json is missing, and the event history is still here/);
-  assert.match(told.out, /beave replay --project-root \. --repair/);
+  assert.match(told.out, /plangonaut replay --project-root \. --repair/);
 
   const repaired = ok(root, ["replay", "--project-root", root, "--repair"]);
   assert.match(repaired, /Rebuilt the state from/);
@@ -408,7 +408,7 @@ test("an event edited without recomputing its own digest is caught", (t) => {
   });
   fs.writeFileSync(eventsPath(root), `${rechained.map((event) => JSON.stringify(event)).join("\n")}\n`);
 
-  const out = beave(root, ["replay", "--project-root", root]);
+  const out = plangonaut(root, ["replay", "--project-root", root]);
   assert.notStrictEqual(out.status, 0);
   assert.match(out.out, /digest it records of itself/);
 });
@@ -419,9 +419,9 @@ test("verification reports an operation waiting to be resolved instead of callin
 
   // `replay --verify` does not recover, on purpose. It used to report DIVERGED
   // with no hint that the project was simply mid-operation.
-  const verified = beave(root, ["replay", "--project-root", root, "--verify"]);
+  const verified = plangonaut(root, ["replay", "--project-root", root, "--verify"]);
   assert.match(verified.out, /interrupted and (is|are) waiting to be resolved/);
-  assert.match(verified.out, /beave recover --project-root \. --apply/);
+  assert.match(verified.out, /plangonaut recover --project-root \. --apply/);
 
   ok(root, ["recover", "--project-root", root, "--apply"]);
   assertConsistent(root);
@@ -430,10 +430,10 @@ test("verification reports an operation waiting to be resolved instead of callin
 test("a journal that cannot be read stops the project with a sentence, not a JSON error", (t) => {
   const root = project(t);
   crashAt(root, "after-staged", ["decision", "--project-root", root, "--id", "DEC-0001", "--title", "x", "--status", "APPROVED", "--owner", "Ada", "--operation-id", "OP-DEC"]);
-  const directory = path.join(root, ".beave", "transactions", fs.readdirSync(path.join(root, ".beave", "transactions"))[0]);
+  const directory = path.join(root, ".plangonaut", "transactions", fs.readdirSync(path.join(root, ".plangonaut", "transactions"))[0]);
   fs.writeFileSync(path.join(directory, "journal.json"), "");
 
-  const blocked = beave(root, ["validate", "--project-root", root]);
+  const blocked = plangonaut(root, ["validate", "--project-root", root]);
   assert.notStrictEqual(blocked.status, 0);
   assert.match(blocked.out, /journal of an interrupted operation cannot be read/);
   assert.doesNotMatch(blocked.out, /Unexpected end of JSON input/);
@@ -446,7 +446,7 @@ test("a journal that cannot be read stops the project with a sentence, not a JSO
 
 test("a directory under transactions with no journal is reported, not ignored for ever", (t) => {
   const root = project(t);
-  fs.mkdirSync(path.join(root, ".beave", "transactions", "orphan"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".plangonaut", "transactions", "orphan"), { recursive: true });
   const reported = ok(root, ["recover", "--project-root", root]);
   assert.match(reported, /NO_JOURNAL/);
   assert.match(reported, /Remove it by hand/);
@@ -468,7 +468,7 @@ test("a torn final line of the history has a bounded remedy, and a torn middle o
 
   const applied = ok(root, ["recover", "--project-root", root, "--apply"]);
   assert.match(applied, /Removed the torn final line/);
-  assert.match(applied, /\.beave\/backups\//);
+  assert.match(applied, /\.plangonaut\/backups\//);
   // Two events left, the state at the revision the history now ends on, and a
   // project that works again.
   assert.strictEqual(readEvents(root).length, 2);

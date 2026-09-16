@@ -18,11 +18,11 @@ import { ageProject } from "./older-engine.mjs";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 let counter = 0;
 
-function beave(root, args) {
+function plangonaut(root, args) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `c${counter}-${Date.now()}`);
@@ -31,7 +31,7 @@ function beave(root, args) {
 }
 
 function ok(root, args) {
-  const result = beave(root, args);
+  const result = plangonaut(root, args);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
@@ -52,7 +52,7 @@ function projectAt(t, root, name) {
 }
 
 function scratch(t, folder) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), "beave-compat-"));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-compat-"));
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));
   return path.join(base, folder);
 }
@@ -63,10 +63,10 @@ test("a folder whose path has spaces and non-ASCII characters replays like any o
   ok(root, ["qa-ask", "--project-root", root, "--id", "QNA-0001", "--question", "Quante infornate a settimana?", "--rationale", "Dimensionare il forno", "--owner", "Ada"]);
 
   assert.match(ok(root, ["replay", "--project-root", root]), /matches its history exactly/);
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
 
   // The text survives the round trip through the event log byte for byte.
-  const events = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8");
+  const events = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8");
   assert.match(events, /Impasto a lievitazione lunga/);
   assert.match(events, /Quante infornate a settimana\?/);
 });
@@ -78,7 +78,7 @@ test("a recorded path spelled the Windows way does not stop a replay", (t) => {
   const preview = JSON.parse(ok(root, ["doc-diff", ...base]));
   ok(root, ["doc-save", ...base, "--confirm-token", preview.confirmation_token]);
 
-  const statePath = path.join(root, ".beave", "state.json");
+  const statePath = path.join(root, ".plangonaut", "state.json");
   const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
   state.artifacts[0].base_path = state.artifacts[0].base_path.replaceAll("/", "\\");
   state.artifacts[0].working_path = state.artifacts[0].working_path.replaceAll("/", "\\");
@@ -86,7 +86,7 @@ test("a recorded path spelled the Windows way does not stop a replay", (t) => {
   // The spelling comes from an older engine, and so does the history it belongs to.
   ageProject(root);
 
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   ok(root, ["migrate", "--project-root", root]);
   ok(root, ["baseline", "--project-root", root, "--reason", "Upgraded after normalising historic separators", "--owner", "Ada"]);
   assert.match(ok(root, ["replay", "--project-root", root]), /matches its history exactly/);
@@ -119,12 +119,12 @@ test("a project handed over in a package replays in the folder it arrives in", (
   assert.match(replayed, /matches its history exactly/);
   assert.match(replayed, /from PROJECT_PACKAGE_IMPORTED/);
   assert.match(replayed, /1 earlier event is kept in the file and is not covered by this proof/);
-  assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0);
+  assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0);
 
   // And that one event is the export origin, which names the history it was made
   // from without carrying it.
   const arrived = fs
-    .readFileSync(path.join(destination, ".beave", "events.jsonl"), "utf8")
+    .readFileSync(path.join(destination, ".plangonaut", "events.jsonl"), "utf8")
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line));
@@ -161,13 +161,13 @@ test("an older project keeps working, and is told exactly what it cannot prove",
   assert.ok(aged >= 2);
 
   // Everything still works. The only difference is what can be proved about it.
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
   ok(root, ["risk", "--project-root", root, "--id", "RSK-0001", "--title", "Oven fails", "--severity", "HIGH", "--status", "IDENTIFIED", "--owner", "Ada"]);
 
   const validated = ok(root, ["validate", "--project-root", root]);
-  assert.match(validated, /Beave state is valid/);
+  assert.match(validated, /Plangonaut state is valid/);
   assert.match(validated, /no point the state can be rebuilt from/);
-  assert.match(validated, /beave baseline/);
+  assert.match(validated, /plangonaut baseline/);
 
   const resumed = ok(root, ["resume", "--project-root", root]);
   assert.match(resumed, /What the history can and cannot prove/);

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { main } from "../lib/cli.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const fixtureRoot = path.join(os.tmpdir(), "beave-tests-node");
+const fixtureRoot = path.join(os.tmpdir(), "plangonaut-tests-node");
 
 function fixture(name) {
   fs.mkdirSync(fixtureRoot, { recursive: true });
@@ -87,7 +87,7 @@ test("init, resume, override, reconcile and validate", async () => {
 test("validation detects state and event divergence", async () => {
   const project = fixture("divergence");
   await initialize(project);
-  const statePath = path.join(project, ".beave", "state.json");
+  const statePath = path.join(project, ".plangonaut", "state.json");
   const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
   state.revision += 1;
   fs.writeFileSync(statePath, JSON.stringify(state));
@@ -102,8 +102,8 @@ test("installer supports dry-run and refuses silent overwrite", async () => {
   assert.match(preview, /Would install codex/);
   assert.equal(fs.existsSync(path.join(project, ".agents")), false);
   await run("install", "--target", "all", "--scope", "project", "--project-root", project);
-  assert.ok(fs.existsSync(path.join(project, ".agents", "skills", "beave", "SKILL.md")));
-  assert.ok(fs.existsSync(path.join(project, ".claude", "skills", "beave", "SKILL.md")));
+  assert.ok(fs.existsSync(path.join(project, ".agents", "skills", "plangonaut", "SKILL.md")));
+  assert.ok(fs.existsSync(path.join(project, ".claude", "skills", "plangonaut", "SKILL.md")));
   const conflict = await invoke("install", "--target", "codex", "--scope", "project", "--project-root", project);
   assert.equal(conflict.status, 2);
   assert.match(conflict.stderr, /Refusing to overwrite/);

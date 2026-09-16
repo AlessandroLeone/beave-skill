@@ -29,14 +29,14 @@ import { fileURLToPath } from "node:url";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(HERE, "..", "lib", "bin", "beave.js");
+const CLI = path.resolve(HERE, "..", "lib", "bin", "plangonaut.js");
 
 const SENTINEL_USER = "SENTINELUSER-b7f2";
 const SENTINEL_FOLDER = "Cartella Sentinella — privata";
 
 let counter = 0;
 
-function beave(cwd, args, env = {}) {
+function plangonaut(cwd, args, env = {}) {
   counter += 1;
   const full = [...args];
   if (!full.includes("--operation-id")) full.push("--operation-id", `PKG${counter}-${Date.now()}`);
@@ -45,13 +45,13 @@ function beave(cwd, args, env = {}) {
 }
 
 function ok(cwd, args, env) {
-  const result = beave(cwd, args, env);
+  const result = plangonaut(cwd, args, env);
   assert.strictEqual(result.status, 0, `expected success from ${args[0]}:\n${result.out}`);
   return result.out;
 }
 
 function base(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beave-portable-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-portable-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -114,7 +114,14 @@ function leaks(pkg, root) {
     ["this machine's hostname", os.hostname()],
     ["this account's user name", os.userInfo().username],
     ["a process id field", '"pid"'],
-    ["a staging marker", "beave-staging"],
+    /*
+     * Both spellings. The marker was renamed with the product, and a package
+     * built by an earlier engine still carries the old one — so a scan that
+     * knew only the current name would pass a package leaking the previous
+     * machine's paths, which is the one thing this list exists to prevent.
+     */
+    ["a staging marker", "plangonaut-staging"],
+    ["a legacy staging marker", "beave-staging"],
     ["a journal", '"journal"'],
     ["a lock", "lock.json"],
   ];
@@ -164,8 +171,8 @@ test("the package declares the transformation, and the digest of the history it 
 
   // The digest is of the exporting project's real history, and can be checked
   // against it by anyone holding both.
-  const sourceHistory = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8");
-  const digest = spawnSync(process.execPath, ["-e", "const c=require('node:crypto'),f=require('node:fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))", path.join(root, ".beave", "events.jsonl")], { encoding: "utf8" }).stdout;
+  const sourceHistory = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8");
+  const digest = spawnSync(process.execPath, ["-e", "const c=require('node:crypto'),f=require('node:fs');process.stdout.write(c.createHash('sha256').update(f.readFileSync(process.argv[1])).digest('hex'))", path.join(root, ".plangonaut", "events.jsonl")], { encoding: "utf8" }).stdout;
   assert.strictEqual(transform.source_history_sha256, digest);
   assert.strictEqual(transform.source_event_count, sourceHistory.split(/\r?\n/).filter(Boolean).length);
 
@@ -184,13 +191,13 @@ test("the package arrives somewhere completely different and is a project there"
   const destination = path.join(base(t), "Users", "ALTRO-UTENTE", "Documenti", "arrivo");
   ok(root, ["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-ARRIVE"]);
 
-  assert.strictEqual(beave(destination, ["validate", "--project-root", destination]).status, 0);
-  assert.strictEqual(beave(destination, ["replay", "--project-root", destination, "--verify"]).status, 0);
-  const resumed = beave(destination, ["resume", "--project-root", destination]);
+  assert.strictEqual(plangonaut(destination, ["validate", "--project-root", destination]).status, 0);
+  assert.strictEqual(plangonaut(destination, ["replay", "--project-root", destination, "--verify"]).status, 0);
+  const resumed = plangonaut(destination, ["resume", "--project-root", destination]);
   assert.strictEqual(resumed.status, 0, resumed.out);
 
   // Everything the project decided came with it.
-  const state = JSON.parse(fs.readFileSync(path.join(destination, ".beave", "state.json"), "utf8"));
+  const state = JSON.parse(fs.readFileSync(path.join(destination, ".plangonaut", "state.json"), "utf8"));
   assert.strictEqual(state.project.root, destination);
   assert.deepStrictEqual(state.decisions.map((item) => item.id), ["DEC-1"]);
   assert.deepStrictEqual(state.requirements.map((item) => item.id), ["REQ-1"]);
@@ -207,15 +214,15 @@ test("the package arrives somewhere completely different and is a project there"
 
 test("exporting changes nothing in the project that was exported", (t) => {
   const root = exportable(t);
-  const before = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8");
-  const beforeState = fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8");
+  const before = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8");
+  const beforeState = fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8");
 
   ok(root, ["project-export", "--project-root", root, "--output-dir", path.join(base(t), "pacchetto")]);
 
-  assert.strictEqual(fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8"), before, "the export rewrote the source history");
-  assert.strictEqual(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"), beforeState, "the export rewrote the source state");
-  assert.strictEqual(beave(root, ["validate", "--project-root", root]).status, 0);
-  assert.strictEqual(beave(root, ["replay", "--project-root", root, "--verify"]).status, 0);
+  assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8"), before, "the export rewrote the source history");
+  assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"), beforeState, "the export rewrote the source state");
+  assert.strictEqual(plangonaut(root, ["validate", "--project-root", root]).status, 0);
+  assert.strictEqual(plangonaut(root, ["replay", "--project-root", root, "--verify"]).status, 0);
 });
 
 test("two exports of the same project produce the same files, apart from the instants they record", (t) => {
@@ -243,9 +250,9 @@ test("a package somebody edited is refused", (t) => {
   const target = path.join(pkg, "files", "docs", "HANDOFF.md");
   fs.writeFileSync(target, `${fs.readFileSync(target, "utf8")}\nand one more line nobody recorded\n`);
 
-  const verified = beave(root, ["project-verify", "--package-dir", pkg]);
+  const verified = plangonaut(root, ["project-verify", "--package-dir", pkg]);
   assert.notStrictEqual(verified.status, 0, "an edited package verified");
-  const imported = beave(root, ["project-import", "--package-dir", pkg, "--project-root", path.join(base(t), "arrivo")]);
+  const imported = plangonaut(root, ["project-import", "--package-dir", pkg, "--project-root", path.join(base(t), "arrivo")]);
   assert.notStrictEqual(imported.status, 0, "an edited package imported");
 });
 
@@ -269,7 +276,7 @@ test("NEGATIVE CONTROL: the scan finds each thing it is looking for when it is t
     ["content: this hostname", "planted.txt", `${os.hostname()}\n`],
     ["content: a pid field", "planted.txt", '{"pid": 4242}\n'],
     ["content: a lock", "planted.txt", "lock.json\n"],
-    ["content: a staging marker", "planted.txt", ".beave-staging.json\n"],
+    ["content: a staging marker", "planted.txt", ".plangonaut-staging.json\n"],
     ["a file NAMED after the sentinel user", `${SENTINEL_USER}.txt`, "harmless\n"],
   ];
 
@@ -297,11 +304,11 @@ test("a package carrying a staging marker is refused, because that file is the m
   // Killed between the rename and the marker's removal: the package is complete
   // and carries one file that names the machine that made it.
   const killed = spawnSync(process.execPath, [CLI, "project-export", "--project-root", root, "--output-dir", pkg, "--operation-id", "OP-KILLED"], {
-    cwd: root, encoding: "utf8", env: { ...process.env, BEAVE_FAULT_AT: "staging-after-rename" },
+    cwd: root, encoding: "utf8", env: { ...process.env, PLANGONAUT_FAULT_AT: "staging-after-rename" },
   });
   assert.strictEqual(killed.status, 97, `${killed.stdout}${killed.stderr}`);
 
-  const marker = JSON.parse(fs.readFileSync(path.join(pkg, ".beave-staging.json"), "utf8"));
+  const marker = JSON.parse(fs.readFileSync(path.join(pkg, ".plangonaut-staging.json"), "utf8"));
   assert.ok(marker.host && marker.pid && marker.source, "the marker no longer carries what this test is about");
 
   /*
@@ -309,12 +316,12 @@ test("a package carrying a staging marker is refused, because that file is the m
    * exited 0 — over a file holding the exporter's absolute paths, hostname and
    * PID, in the one command whose job is to check a package before a handoff.
    */
-  const verified = beave(root, ["project-verify", "--package-dir", pkg]);
+  const verified = plangonaut(root, ["project-verify", "--package-dir", pkg]);
   assert.notStrictEqual(verified.status, 0);
   assert.match(verified.out, /records the exporting machine/);
   assert.doesNotMatch(verified.out, /harmless/);
 
-  const imported = beave(root, ["project-import", "--package-dir", pkg, "--project-root", path.join(base(t), "arrivo")]);
+  const imported = plangonaut(root, ["project-import", "--package-dir", pkg, "--project-root", path.join(base(t), "arrivo")]);
   assert.notStrictEqual(imported.status, 0);
 
   // The scan agrees with the refusal: while that file is there, the package
@@ -342,7 +349,7 @@ test("the manifest cannot claim a history the package's own origin contradicts",
     manifest.history_transform[field] = value;
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-    const verified = beave(root, ["project-verify", "--package-dir", pkg]);
+    const verified = plangonaut(root, ["project-verify", "--package-dir", pkg]);
     assert.notStrictEqual(verified.status, 0, `a manifest claiming a false ${field} verified`);
     assert.match(verified.out, /disagree about|contradicts itself/);
 
@@ -354,7 +361,7 @@ test("the manifest cannot claim a history the package's own origin contradicts",
      * place it will be read back later.
      */
     const destination = path.join(base(t), `from-false-${field}`);
-    const imported = beave(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
+    const imported = plangonaut(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
     assert.notStrictEqual(imported.status, 0, `a manifest claiming a false ${field} was imported`);
     assert.ok(!fs.existsSync(destination));
     fs.writeFileSync(manifestPath, original);
@@ -374,7 +381,7 @@ test("PROJECT_ENTRY.md does not promise a history the package does not carry", (
    * did for whoever exported". It returns `[]`: it reads the event log, and the
    * log a package carries begins at the export.
    */
-  const history = beave(destination, ["doc-history", "--project-root", destination, "--id", "ART-1"]);
+  const history = plangonaut(destination, ["doc-history", "--project-root", destination, "--id", "ART-1"]);
   assert.strictEqual(history.status, 0);
   const entry = fs.readFileSync(path.join(pkg, "PROJECT_ENTRY.md"), "utf8");
   if (JSON.parse(history.out.trim() || "[]").length === 0) {
@@ -413,12 +420,12 @@ test("a package with no attestation at all is refused, and a falsy one is not a 
     mutate(manifest);
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-    const verified = beave(root, ["project-verify", "--package-dir", pkg]);
+    const verified = plangonaut(root, ["project-verify", "--package-dir", pkg]);
     assert.notStrictEqual(verified.status, 0, `an attestation ${what} verified`);
     assert.match(verified.out, /declares no `history_transform`|disagree about|contradicts itself/);
 
     const destination = path.join(base(t), `arrivo-${what.replace(/\s+/g, "-")}`);
-    const imported = beave(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
+    const imported = plangonaut(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
     assert.notStrictEqual(imported.status, 0, `an attestation ${what} was imported`);
     assert.ok(!fs.existsSync(destination), `the destination was created for an attestation ${what}`);
   }
@@ -456,12 +463,12 @@ test("a package whose ledger was edited is refused, not imported and then found 
   entry.bytes = Buffer.byteLength(forged);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-  const verified = beave(root, ["project-verify", "--package-dir", pkg]);
+  const verified = plangonaut(root, ["project-verify", "--package-dir", pkg]);
   assert.notStrictEqual(verified.status, 0, "a package with an edited ledger verified");
   assert.match(verified.out, /does not match the digest it records of itself/);
 
   const destination = path.join(base(t), "da-ledger-modificato");
-  const imported = beave(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
+  const imported = plangonaut(root, ["project-import", "--package-dir", pkg, "--project-root", destination]);
   assert.notStrictEqual(imported.status, 0, "a package with an edited ledger was imported");
   assert.ok(!fs.existsSync(destination));
 });

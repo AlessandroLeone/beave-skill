@@ -15,8 +15,8 @@ import { ageProject } from "./older-engine.mjs";
  *
  *  * **B5** — `validate` re-hashed `modules[].evidence` and
  *    `human_overrides[].source` and left `gates[].evidence` alone. Deleting the
- *    file a gate was PASSED on left `beave validate` answering
- *    "Beave state is valid.", in both implementations, so the shared DOCOP-001
+ *    file a gate was PASSED on left `plangonaut validate` answering
+ *    "Plangonaut state is valid.", in both implementations, so the shared DOCOP-001
  *    corpus could not see the difference either. A gate is the record that says a
  *    phase may end.
  *  * **OD-012** — the refusal named a remedy ("re-record it against the current
@@ -38,7 +38,7 @@ import { ageProject } from "./older-engine.mjs";
  * reverted engine without a second copy of the tests.
  */
 
-const CLI = process.env.BEAVE_CLI ? path.resolve(process.env.BEAVE_CLI) : path.resolve("lib/bin/beave.js");
+const CLI = process.env.PLANGONAUT_CLI ? path.resolve(process.env.PLANGONAUT_CLI) : path.resolve("lib/bin/plangonaut.js");
 const owners = { product: "Ada", technical: "Ada", budget: "Ada", safety: "Ada", release: "Ada" };
 
 function run(args, cwd) {
@@ -54,12 +54,12 @@ function run(args, cwd) {
 }
 
 function readState(root) {
-  return JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  return JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
 }
 
 function events(root) {
   return fs
-    .readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8")
+    .readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8")
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => JSON.parse(line));
@@ -70,7 +70,7 @@ function sha256(bytes) {
 }
 
 function project(name = "ALN008") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-aln008-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-aln008-"));
   fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify(owners));
   const result = run([
     "init", "--project-root", ".", "--project-name", name, "--project-mode", "Genesis",
@@ -111,7 +111,7 @@ describe("ALN-008 B5: validate re-verifies the evidence a gate was passed on", (
     assert.match(result.stderr, /gate G1 records evidence at docs\/gate-1\.md, which is missing or escapes the project root/);
     // A refusal that names no route out is how OD-012 happened. This one names a
     // command that exists.
-    assert.match(result.stderr, /beave re-record --project-root \. --kind gate --id G1/);
+    assert.match(result.stderr, /plangonaut re-record --project-root \. --kind gate --id G1/);
   });
 
   it("refuses when the evidence a gate was PASSED on was revised", () => {
@@ -130,7 +130,7 @@ describe("ALN-008 B5: validate re-verifies the evidence a gate was passed on", (
     // Widening this check last time (L26) invalidated every project written before
     // the rule. Both ALN-005 pilots hold gates in exactly the shape produced here.
     const root = projectWithGate("GateLegacy");
-    const location = path.join(root, ".beave", "state.json");
+    const location = path.join(root, ".plangonaut", "state.json");
     const state = JSON.parse(fs.readFileSync(location, "utf8"));
     for (const gate of state.gates) {
       delete gate.evidence;
@@ -144,7 +144,7 @@ describe("ALN-008 B5: validate re-verifies the evidence a gate was passed on", (
     fs.rmSync(path.join(root, "docs", "gate-1.md"));
     const result = run(["validate", "--project-root", "."], root);
     assert.strictEqual(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Beave state is valid\./);
+    assert.match(result.stdout, /Plangonaut state is valid\./);
     // Silently skipping is what let the defect live. The skip is reported.
     assert.match(result.stdout, /1 of 1 gate record carr(y|ies) no evidence digest, so validate re-verified nothing for them: G1/);
   });
@@ -166,7 +166,7 @@ describe("ALN-008 B5: validate re-verifies the evidence a gate was passed on", (
     const recorded = events(root).find((event) => event.type === "GATE_UPDATED");
     assert.ok(recorded?.evidence_sha256, "the event has always carried the digest");
 
-    const location = path.join(root, ".beave", "state.json");
+    const location = path.join(root, ".plangonaut", "state.json");
     const state = JSON.parse(fs.readFileSync(location, "utf8"));
     for (const gate of state.gates) {
       delete gate.evidence;
@@ -267,7 +267,7 @@ describe("ALN-008 OD-012: re-record, the governed way to re-point a recorded sou
     // The governed migration for a pre-rule gate. Demonstrated on real projects:
     // both ALN-005 pilots were exported, imported and migrated this way.
     const root = projectWithGate("GateMigration");
-    const location = path.join(root, ".beave", "state.json");
+    const location = path.join(root, ".plangonaut", "state.json");
     const state = JSON.parse(fs.readFileSync(location, "utf8"));
     for (const gate of state.gates) {
       delete gate.evidence;
@@ -314,7 +314,7 @@ describe("ALN-008 OD-012: re-record, the governed way to re-point a recorded sou
 
     const kind = run([...base, "--kind", "module", "--id", "1"], root);
     assert.strictEqual(kind.status, 2);
-    assert.match(kind.stderr, /Unsupported --kind: module\. Beave can re-record the source of an override or the evidence of a gate\./);
+    assert.match(kind.stderr, /Unsupported --kind: module\. Plangonaut can re-record the source of an override or the evidence of a gate\./);
 
     const missingGate = run([...base, "--kind", "gate", "--id", "G7"], root);
     assert.strictEqual(missingGate.status, 2);
@@ -334,10 +334,10 @@ describe("ALN-008 OD-012: re-record, the governed way to re-point a recorded sou
     assert.strictEqual(stranger.status, 2);
     assert.match(stranger.stderr, /Owner is not one of the confirmed decision owners/);
 
-    // Gate evidence obeys the containment rule `beave gate` already enforces,
-    // unchanged and shared with it: inside the project, outside `.beave`. The
+    // Gate evidence obeys the containment rule `plangonaut gate` already enforces,
+    // unchanged and shared with it: inside the project, outside `.plangonaut`. The
     // wording for a path that escapes the root is inherited from `verifiedEvidence`
-    // and used to be poor: it talked about `.beave` when the real fault is that the
+    // and used to be poor: it talked about `.plangonaut` when the real fault is that the
     // path leaves the project. `safeArtifactPath` answers no to two unrelated
     // questions and every caller reported the second, so somebody who passed an
     // absolute path was told about a directory they had not mentioned. The refusal
@@ -347,18 +347,18 @@ describe("ALN-008 OD-012: re-record, the governed way to re-point a recorded sou
       "--owner", "Ada", "--reason", "why"], root);
     assert.strictEqual(outside.status, 2);
     assert.match(outside.stderr, /Evidence must be a path inside the project, written relative to its root/);
-    assert.doesNotMatch(outside.stderr, /reserved \.beave directory/,
-      "a path that escapes the root has nothing to do with .beave, and saying so sends the reader to the wrong fix");
+    assert.doesNotMatch(outside.stderr, /reserved \.plangonaut directory/,
+      "a path that escapes the root has nothing to do with .plangonaut, and saying so sends the reader to the wrong fix");
 
     // The other branch of the same guard, pinned so the two reasons cannot collapse
     // back into one message: a path inside the ledger's own directory is refused for
     // a different reason and has to say so.
-    fs.mkdirSync(path.join(root, ".beave", "smuggled"), { recursive: true });
-    fs.writeFileSync(path.join(root, ".beave", "smuggled", "evidence.md"), "inside the ledger\n");
+    fs.mkdirSync(path.join(root, ".plangonaut", "smuggled"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".plangonaut", "smuggled", "evidence.md"), "inside the ledger\n");
     const reserved = run(["re-record", "--project-root", ".", "--kind", "gate", "--id", "G1",
-      "--source-file", ".beave/smuggled/evidence.md", "--owner", "Ada", "--reason", "why"], root);
+      "--source-file", ".plangonaut/smuggled/evidence.md", "--owner", "Ada", "--reason", "why"], root);
     assert.strictEqual(reserved.status, 2);
-    assert.match(reserved.stderr, /must stay outside the reserved \.beave directory/);
+    assert.match(reserved.stderr, /must stay outside the reserved \.plangonaut and \.beave directories/);
 
     const missingFile = run(["re-record", "--project-root", ".", "--kind", "gate", "--id", "G1",
       "--source-file", "docs/never-written.md", "--owner", "Ada", "--reason", "why"], root);
@@ -408,12 +408,12 @@ describe("ALN-008 OD-012: re-record, the governed way to re-point a recorded sou
         "--source-file", "docs/gate-1.md", "--owner", "Ada", "--reason", "revised"], root).status,
       0,
     );
-    const transactions = path.join(root, ".beave", "transactions");
+    const transactions = path.join(root, ".plangonaut", "transactions");
     assert.ok(
       !fs.existsSync(transactions) || fs.readdirSync(transactions).length === 0,
       "a completed re-record leaves no open transaction",
     );
-    const backups = fs.readdirSync(path.join(root, ".beave", "backups"));
+    const backups = fs.readdirSync(path.join(root, ".plangonaut", "backups"));
     assert.ok(backups.some((name) => name.startsWith("state.json.")), "the previous state must stay recoverable");
     assert.strictEqual(events(root).at(-1).type, "RECORDED_SOURCE_UPDATED");
   });

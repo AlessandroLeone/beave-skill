@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const CLI = path.resolve("lib/bin/beave.js");
+const CLI = path.resolve("lib/bin/plangonaut.js");
 
 function runCli(args, cwd) {
   if (["doc-save","doc-mark-deletion","doc-restore","doc-finalize"].includes(args[0]) && !args.includes("--operation-id")) args = [...args, "--operation-id", `OP-${crypto.randomUUID()}`];
@@ -20,7 +20,7 @@ function runCli(args, cwd) {
 
 describe("DOCOP-001 Document Operations (IMP-005)", () => {
   it("saves a document, progressing -vN suffix and backing up history", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-1-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-docop-1-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-save"], root);
     
@@ -39,11 +39,11 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
     // docs/design-v2.md should exist, v1 should be in history
     assert.strictEqual(fs.readFileSync(path.join(root, "docs/design-v2.md"), "utf8"), "hello v2");
     assert.strictEqual(fs.existsSync(path.join(root, "docs/design-v1.md")), false);
-    assert.strictEqual(fs.readFileSync(path.join(root, ".beave/history/ART-00000000-v1.md"), "utf8"), "hello v1");
+    assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut/history/ART-00000000-v1.md"), "utf8"), "hello v1");
   });
 
   it("detects external edits and prevents silent overwrites", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-2-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-docop-2-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-drift"], root);
     
@@ -61,7 +61,7 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
   });
 
   it("finalizes a document and drops the -vN suffix", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-3-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-docop-3-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-finalize"], root);
     
@@ -75,11 +75,11 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
     assert.strictEqual(fs.readFileSync(path.join(root, "docs/design.md"), "utf8"), "hello final");
     // v1 should be in history
     assert.strictEqual(fs.existsSync(path.join(root, "docs/design-v1.md")), false);
-    assert.strictEqual(fs.readFileSync(path.join(root, ".beave/history/ART-00000000-v1.md"), "utf8"), "hello final");
+    assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut/history/ART-00000000-v1.md"), "utf8"), "hello final");
   });
 
   it("restores a document from history as a new revision", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-test-docop-4-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-test-docop-4-"));
     fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify({ product: "A", technical: "B", budget: "C", safety: "D", release: "E" }));
     runCli(["init", "--project-root", ".", "--project-name", "DocTest", "--project-mode", "Resume", "--interaction-mode", "Expert", "--owners-file", "owners.json", "--operation-id", "OP-init-doc-restore"], root);
     
@@ -95,6 +95,6 @@ describe("DOCOP-001 Document Operations (IMP-005)", () => {
     // docs/design-v3.md should exist and have v1 content
     assert.strictEqual(fs.readFileSync(path.join(root, "docs/design-v3.md"), "utf8"), "hello v1");
     assert.strictEqual(fs.existsSync(path.join(root, "docs/design-v2.md")), false);
-    assert.strictEqual(fs.readFileSync(path.join(root, ".beave/history/ART-00000000-v2.md"), "utf8"), "hello v2");
+    assert.strictEqual(fs.readFileSync(path.join(root, ".plangonaut/history/ART-00000000-v2.md"), "utf8"), "hello v2");
   });
 });

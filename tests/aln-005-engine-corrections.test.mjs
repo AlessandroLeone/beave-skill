@@ -18,7 +18,7 @@ import { ageProject } from "./older-engine.mjs";
  * Evidence: `docs/evidence/ALN005_HANDOFF_PILOTS_2026-09-10.md`.
  */
 
-const CLI = path.resolve("lib/bin/beave.js");
+const CLI = path.resolve("lib/bin/plangonaut.js");
 const owners = { product: "A", technical: "B", budget: "C", safety: "D", release: "E" };
 
 function run(args, cwd) {
@@ -39,7 +39,7 @@ function run(args, cwd) {
 }
 
 function project(name = "ALN005") {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-aln005-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-aln005-"));
   fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify(owners));
   const result = run([
     "init", "--project-root", ".", "--project-name", name, "--project-mode", "Genesis",
@@ -63,7 +63,7 @@ describe("ALN-005 engine corrections", () => {
     assert.strictEqual(result.status, 2, result.stdout);
     assert.match(result.stderr, /Unknown option for task: --description/);
     assert.match(result.stderr, /Nothing was written/);
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.deepEqual(state.tasks, [], "nothing may be written when an option is refused");
   });
 
@@ -104,14 +104,14 @@ describe("ALN-005 engine corrections", () => {
       run(["doc-save", "--project-root", ".", "--id", "ART-1", "--base-path", "docs/s.md", "--content-file", "a.md", "--owner", "A", "--sources", "DEC-1,DEC-2"], root).status,
       0,
     );
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.deepEqual(state.artifacts[0].provenance, ["DEC-1", "DEC-2"]);
   });
 
   it("refuses an owner role it cannot represent", () => {
     // Pilot B supplied `compliance` and `quality` for a CE-marked product. `init`
     // succeeded, said nothing, and stored neither.
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-aln005-owners-"));
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-aln005-owners-"));
     fs.writeFileSync(
       path.join(root, "owners.json"),
       JSON.stringify({ ...owners, compliance: "Chiara", quality: "Paolo" }),
@@ -123,7 +123,7 @@ describe("ALN-005 engine corrections", () => {
     assert.strictEqual(result.status, 2, result.stdout);
     assert.match(result.stderr, /compliance/);
     assert.match(result.stderr, /quality/);
-    assert.ok(!fs.existsSync(path.join(root, ".beave")), "a refused init writes no state");
+    assert.ok(!fs.existsSync(path.join(root, ".plangonaut")), "a refused init writes no state");
   });
 
   it("validate reports a module whose recorded evidence no longer matches its file", () => {
@@ -196,7 +196,7 @@ describe("ALN-005 engine corrections", () => {
   it("a preview refuses the paths the save refuses", () => {
     const root = project("Paths");
     fs.writeFileSync(path.join(root, "a.md"), "alpha\n");
-    for (const basePath of [".beave/state.json", "../escape.md"]) {
+    for (const basePath of [".plangonaut/state.json", "../escape.md"]) {
       const preview = JSON.parse(run(["doc-diff", "--project-root", ".", "--id", "ART-X", "--base-path", basePath, "--content-file", "a.md", "--owner", "A"], root).stdout);
       assert.ok(preview.blockers.length > 0, `${basePath} previewed cleanly for a save that can never succeed`);
       assert.strictEqual(preview.confirmation_token, "");
@@ -207,7 +207,7 @@ describe("ALN-005 engine corrections", () => {
     const root = project("Backups");
     // Right after `init` the directory does not exist at all: nothing has been
     // overwritten yet, so nothing has been copied.
-    const backupDir = path.join(root, ".beave", "backups");
+    const backupDir = path.join(root, ".plangonaut", "backups");
     const backups = () => (fs.existsSync(backupDir) ? fs.readdirSync(backupDir) : []);
     // `events.jsonl` is append-only: copying it before every append duplicated the
     // whole log each time, which is why the pilot reached 104 MB of backups
@@ -229,7 +229,7 @@ describe("ALN-005 engine corrections", () => {
     assert.ok(backups().filter((name) => name.startsWith("state.json.")).length >= 3);
 
     // And the log really did keep everything.
-    const events = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8").split(/\r?\n/).filter(Boolean);
+    const events = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8").split(/\r?\n/).filter(Boolean);
     assert.ok(events.length >= 4);
   });
 
@@ -252,7 +252,7 @@ describe("ALN-005 engine corrections", () => {
     ], root);
     assert.strictEqual(result.status, 0, result.stderr);
 
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     const gate = state.gates.find((item) => item.name === "G1");
     assert.strictEqual(gate.status, "WARN");
     assert.strictEqual(gate.consequence, "module 3 is unverified");
@@ -305,7 +305,7 @@ describe("ALN-005 engine corrections", () => {
     // Asserted as one exact string, because `docop.rs` asserts the same string:
     // Studio and the engine must name the same route out of the same refusal.
     assert.ok(blocked.stderr.includes(
-      "- evidence EVD-001 no longer matches evidence/E1.md: re-record it with `beave evidence --id EVD-001 --file evidence/E1.md --owner <owner> --expected-revision 1`. Until then every mutation is refused, because this check runs inside the transaction."
+      "- evidence EVD-001 no longer matches evidence/E1.md: re-record it with `plangonaut evidence --id EVD-001 --file evidence/E1.md --owner <owner> --expected-revision 1`. Until then every mutation is refused, because this check runs inside the transaction."
     ), blocked.stderr);
 
     // And the route the message names actually works.
@@ -323,20 +323,44 @@ describe("ALN-005 engine corrections", () => {
     // The check stays: a state written for one root must not be operated on at
     // another without a governed re-rooting. What it now does is name the route.
     const root = project("Moved");
-    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "beave-moved-"));
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-moved-"));
     fs.cpSync(root, elsewhere, { recursive: true });
 
     for (const command of ["status", "validate", "resume"]) {
       const refused = run([command, "--project-root", "."], elsewhere);
       assert.strictEqual(refused.status, 2, `${command} should refuse a moved project`);
-      assert.match(refused.stderr, /project root does not match requested root/);
+      /*
+       * The channel, not the sentence, is what changed under this test.
+       *
+       * It was written when every refusal was a line on stderr. ALN-016 made a
+       * refusal from a machine-output command a **document on stdout** \u2014 one
+       * parseable object even for a caller that merges the two streams \u2014 and
+       * these three commands are machine-output commands. So the assertions
+       * below are the same assertions, read out of the payload the contract
+       * now puts them in. None of them was weakened to get here: what the
+       * message has to say is still checked word for word.
+       */
+      // `status` is a machine-output command and answers with a document;
+      // `validate` and `resume` write for a person and answer on stderr. Both
+      // are the contract, and the test reads whichever channel this command
+      // owns rather than assuming one for all three.
+      let message;
+      if (refused.stdout.trim().startsWith("{")) {
+        const payload = JSON.parse(refused.stdout);
+        assert.strictEqual(payload.ok, false);
+        message = payload.error.message;
+      } else {
+        assert.strictEqual(refused.stdout, "", `${command} must not split its refusal across channels`);
+        message = refused.stderr;
+      }
+      assert.match(message, /project root does not match requested root/);
       // Both roots, so the reader can see what happened.
-      assert.ok(refused.stderr.includes(root), refused.stderr);
+      assert.ok(message.includes(root), message);
       // The route out.
-      assert.match(refused.stderr, /beave project-export/);
-      assert.match(refused.stderr, /beave project-import/);
+      assert.match(message, /project-export/);
+      assert.match(message, /project-import/);
       // And the distinction the dossiers could not make.
-      assert.match(refused.stderr, /not the project state being broken/);
+      assert.match(message, /not the project state being broken/);
     }
 
     // The same folder in its own place is untouched by any of this.
@@ -354,7 +378,7 @@ describe("ALN-005 engine corrections", () => {
       run(["record", "--project-root", ".", "--module", String(id), "--status", "CONFIRMED",
            "--answer-file", "answer.md", "--owner", "A", "--summary", `m${id}`], root);
     const nextAction = () =>
-      JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8")).exact_next_action;
+      JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8")).exact_next_action;
 
     // 1 - ordinary interview: the engine's own sentence is the engine's to move.
     const first = recordModule(0);
@@ -378,7 +402,7 @@ describe("ALN-005 engine corrections", () => {
       // The suggestion is still reported, so nothing is lost either way.
       assert.match(outcome.stdout, /written by a person, so it is kept unchanged/);
       assert.match(outcome.stdout, /Suggested instead: Discuss module \d+ —/);
-      assert.match(outcome.stdout, /beave checkpoint --next-action/);
+      assert.match(outcome.stdout, /plangonaut checkpoint --next-action/);
     }
 
     // 4 - every surface a recipient reads still carries it.
@@ -421,7 +445,7 @@ describe("ALN-005 engine corrections", () => {
     fs.writeFileSync(path.join(root, "gate.md"), "gate evidence\n");
     const gate = run(["gate", "--project-root", ".", "--id", "G1", "--status", "PASSED", "--evidence-file", "gate.md", "--owner", "A"], root);
     assert.strictEqual(gate.status, 0, gate.stderr);
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(state.exact_next_action, handoff);
     assert.match(gate.stdout, /written by a person, so it is kept unchanged/);
     // The gate itself still did its job.
@@ -445,14 +469,14 @@ describe("ALN-005 engine corrections", () => {
       0,
     );
 
-    const pkg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "beave-rt-")), "pkg");
+    const pkg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-rt-")), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
     assert.strictEqual(run(["project-verify", "--package-dir", pkg], root).status, 0);
 
-    const destination = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "beave-rt-")), "delivered");
+    const destination = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-rt-")), "delivered");
     assert.strictEqual(run(["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-IMPORT-RT"], root).status, 0);
 
-    const delivered = JSON.parse(fs.readFileSync(path.join(destination, ".beave", "state.json"), "utf8"));
+    const delivered = JSON.parse(fs.readFileSync(path.join(destination, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(delivered.exact_next_action, handoff, "the delivered folder must carry the human instruction");
     const resumed = run(["resume", "--project-root", "."], destination);
     assert.strictEqual(resumed.status, 0, resumed.stderr);
@@ -496,12 +520,12 @@ describe("ALN-005 engine corrections", () => {
 
     const digest = crypto.createHash("sha256").update(fs.readFileSync(path.join(root, "reason.md"))).digest("hex");
     const relative = path.join("deletion-reasons", `${digest}.md`);
-    assert.ok(fs.existsSync(path.join(root, ".beave", relative)), "the reason must be archived in the governed area");
+    assert.ok(fs.existsSync(path.join(root, ".plangonaut", relative)), "the reason must be archived in the governed area");
 
     // A package exists only around a published artifact.
     assert.strictEqual(run(["doc-finalize", "--project-root", ".", "--id", "ART-1", "--owner", "A"], root).status, 0);
 
-    const pkg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "beave-del-")), "pkg");
+    const pkg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-del-")), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
 
     // The entry that used to decide the outcome, asserted rather than assumed.
@@ -512,12 +536,12 @@ describe("ALN-005 engine corrections", () => {
     );
     assert.strictEqual(run(["project-verify", "--package-dir", pkg], root).status, 0);
 
-    const destination = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "beave-del-")), "delivered");
+    const destination = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-del-")), "delivered");
     const imported = run(["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-IMPORT-DEL"], root);
     assert.strictEqual(imported.status, 0, imported.stderr);
 
     // Arriving is not enough: the recipient has to be able to read it.
-    const delivered = path.join(destination, ".beave", relative);
+    const delivered = path.join(destination, ".plangonaut", relative);
     assert.ok(fs.existsSync(delivered), "the reason must arrive in the delivered folder");
     assert.strictEqual(fs.readFileSync(delivered, "utf8"), reason, "and it must arrive unchanged");
     assert.strictEqual(run(["validate", "--project-root", "."], destination).status, 0);
@@ -555,10 +579,10 @@ describe("ALN-005 engine corrections", () => {
       0,
     );
 
-    const pkg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "beave-carry-")), "pkg");
+    const pkg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-carry-")), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
     assert.strictEqual(run(["project-verify", "--package-dir", pkg], root).status, 0);
-    const destination = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "beave-carry-")), "delivered");
+    const destination = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-carry-")), "delivered");
     assert.strictEqual(
       run(["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-IMPORT-CARRY"], root).status,
       0,
@@ -585,7 +609,7 @@ describe("ALN-005 engine corrections", () => {
     const result = run(["override", "--project-root", ".", "--instruction-file", "instructions/change.md", "--owner", "A"], root);
     assert.strictEqual(result.status, 0, result.stderr);
 
-    const state = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(state.exact_next_action, handoff, "the human instruction must be kept");
     assert.match(result.stdout, /written by a person, so it is kept unchanged/);
     assert.match(result.stdout, /Suggested instead: Reconcile OVR-/);
@@ -602,7 +626,7 @@ describe("ALN-005 engine corrections", () => {
     assert.strictEqual(refused.status, 2, refused.stdout);
     assert.match(refused.stderr, /Refusing to replace the exact next action/);
     assert.match(refused.stderr, /--replace-human-next-action/);
-    const stillBlocked = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const stillBlocked = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(stillBlocked.exact_next_action, handoff, "a refused reconcile changes nothing");
     assert.strictEqual(stillBlocked.human_overrides[0].status, "OPEN");
 
@@ -612,7 +636,7 @@ describe("ALN-005 engine corrections", () => {
     assert.strictEqual(reconciled.status, 0, reconciled.stderr);
     assert.match(reconciled.stdout, /was replaced, as --replace-human-next-action asked/);
     assert.strictEqual(
-      JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8")).exact_next_action,
+      JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8")).exact_next_action,
       "DELIBERATELY REPLACED",
     );
   });
@@ -639,7 +663,7 @@ describe("ALN-005 engine corrections", () => {
     assert.strictEqual(run(["validate", "--project-root", "."], root).status, 0);
 
     const digest = crypto.createHash("sha256").update(fs.readFileSync(path.join(root, "reason.md"))).digest("hex");
-    const archive = path.join(root, ".beave", "deletion-reasons", `${digest}.md`);
+    const archive = path.join(root, ".plangonaut", "deletion-reasons", `${digest}.md`);
 
     // Live control: the marker recorded an archive, so losing it must be reported.
     fs.rmSync(archive);
@@ -651,7 +675,7 @@ describe("ALN-005 engine corrections", () => {
     // Backward compatibility: the same missing file, on a marker written before
     // the rule, is not an error — there is nothing it could be checked against.
     // A pre-rule ledger is exactly this one without the field.
-    const ledger = path.join(root, ".beave", "events.jsonl");
+    const ledger = path.join(root, ".plangonaut", "events.jsonl");
     const lines = fs.readFileSync(ledger, "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
       const event = JSON.parse(line);
       delete event.reason_archive_path;
@@ -687,7 +711,7 @@ describe("ALN-005 engine corrections", () => {
         0,
       );
     }
-    const before = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const before = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(before.human_overrides.length, 2);
 
     fs.writeFileSync(path.join(root, "evidence.md"), "what was done\n");
@@ -695,7 +719,7 @@ describe("ALN-005 engine corrections", () => {
                         "--evidence-file", "evidence.md", "--owner", "A", "--next-action", "OPERATOR ASKED FOR THIS"], root);
     assert.strictEqual(result.status, 0, result.stderr);
 
-    const after = JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+    const after = JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
     assert.strictEqual(
       after.exact_next_action,
       `Reconcile ${before.human_overrides[1].id} before continuing.`,
@@ -706,7 +730,7 @@ describe("ALN-005 engine corrections", () => {
     assert.match(result.stdout, /OPERATOR ASKED FOR THIS/);
     // Blocker 1. The sentence the blocker displaced is now in the ledger verbatim,
     // not only in a backup that does not travel with the folder.
-    const reconciledEvent = fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8")
+    const reconciledEvent = fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8")
       .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
       .findLast((event) => event.type === "HUMAN_OVERRIDE_RECONCILED");
     assert.strictEqual(reconciledEvent.next_action_outcome, "blocked_by_open_override");
@@ -718,7 +742,7 @@ describe("ALN-005 engine corrections", () => {
                       "--evidence-file", "evidence.md", "--owner", "A", "--next-action", "OPERATOR ASKED FOR THIS"], root);
     assert.strictEqual(last.status, 0, last.stderr);
     assert.strictEqual(
-      JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8")).exact_next_action,
+      JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8")).exact_next_action,
       "OPERATOR ASKED FOR THIS",
     );
     assert.doesNotMatch(last.stdout, /was NOT set/);

@@ -79,7 +79,7 @@ proof that it was asked.
 
 ## Resume
 
-- Run `beave resume --project-root .` first. It is the first thing a host does
+- Run `plangonaut resume --project-root .` first. It is the first thing a host does
   when it is activated inside this project, not something the user has to ask for.
 - Files to read first
 - Safe resume action without credentials

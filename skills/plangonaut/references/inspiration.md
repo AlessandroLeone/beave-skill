@@ -40,16 +40,16 @@ Adopted ideas:
 - dependency waves and context-sized work;
 - persistent state, resume, UAT, gap closure, and security gates.
 
-## Beave improvements
+## Plangonaut improvements
 
 - a broader questionnaire covering purpose, domain, UX, data, safety, legal, economics, operations, tools, and agent governance;
 - explicit propose → ask → wait protocol for every module;
 - human decision ownership and separate approval scopes;
 - artifact depth proportional to project risk instead of one fixed directory system;
-- future multi-agent organization designed and saved before later execution, including permissions, model/effort, cost, context, conflict, and escalation; Beave itself does not delegate;
+- future multi-agent organization designed and saved before later execution, including permissions, model/effort, cost, context, conflict, and escalation; Plangonaut itself does not delegate;
 - external egress and persistent-tool consent as first-class gates;
 - evidence traceability from goals through requirements, decisions, tasks, tests, release, and operations;
 - support for non-code and hybrid digital projects;
 - no mandatory commit, worktree, service, or autonomous execution.
 
-These sources are inspiration, not runtime dependencies. Beave must remain usable when neither framework is installed.
+These sources are inspiration, not runtime dependencies. Plangonaut must remain usable when neither framework is installed.

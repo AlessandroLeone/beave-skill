@@ -1,6 +1,6 @@
 # Multi-Agent System Design
 
-This reference describes a future agent system that Beave may recommend and write into the initialized project. Beave's own procedure uses one host AI model in conversation with the user. It does not spawn, execute, or orchestrate these project agents.
+This reference describes a future agent system that Plangonaut may recommend and write into the initialized project. Plangonaut's own procedure uses one host AI model in conversation with the user. It does not spawn, execute, or orchestrate these project agents.
 
 Design the organization as carefully as the project. Multiple agents are optional. The output is reviewed prompts, roles, permissions, dependencies, contracts, handoffs and execution instructions for the same agent or another runtime after initialization and within authorization.
 

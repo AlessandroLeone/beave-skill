@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://beavelab.it/schemas/beave-state-v2.json",
-  "title": "Beave project state (schema v2 — historical)",
-  "description": "HISTORICAL. This is the v2 schema, kept so that projects written before schema v3 can be read and migrated: `beave migrate` still accepts `schema_version` 1 and 2. It is not the current schema and nothing should be validated against it. The current one is `state-v3.schema.json` in this directory.",
+  "$id": "https://plangonaut.com/schemas/plangonaut-state-v2.json",
+  "title": "Plangonaut project state (schema v2 — historical)",
+  "description": "HISTORICAL. This is the v2 schema, kept so that projects written before schema v3 can be read and migrated: `plangonaut migrate` still accepts `schema_version` 1 and 2. It is not the current schema and nothing should be validated against it. The current one is `state-v3.schema.json` in this directory.",
   "type": "object",
   "required": [
     "schema_version",
@@ -156,7 +156,122 @@
       }
     },
     "blockers": {
-      "type": "array"
+      "type": "array",
+      "$comment": "ALN-015. Heterogeneous by design. A plain string is a blocker written into the state file before this ledger existed: it has no owner, no date and no recorded status, it stays exactly as it was, and it is counted as OPEN because nothing ever recorded it as resolved. Converting one into a record would mean inventing the three fields it never had. New entries are records.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "$comment": "Legacy free text. Preserved, never rewritten, always counted as open."
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "title",
+              "reason",
+              "status",
+              "owner",
+              "recorded_at",
+              "revision",
+              "updated_at"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^BLK-[A-Z0-9_-]+$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "enum": [
+                  "OPEN",
+                  "RESOLVED"
+                ]
+              },
+              "owner": {
+                "type": "string",
+                "minLength": 1
+              },
+              "recorded_at": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "sha256"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                }
+              },
+              "resolved_at": {
+                "type": "string"
+              },
+              "resolved_by": {
+                "type": "string"
+              },
+              "resolution": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "$comment": "RESOLVED keeps the record and gains resolution, resolved_by and resolved_at. Resolving never deletes: a blocker that happened and was cleared is part of how the project went."
+          }
+        ]
+      }
+    },
+    "blockers_none_verified": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "$comment": "ALN-015. Somebody looked and found nothing open, with their name on it. NOT required: every project written before this is valid and carries none, and absent means 'nobody has said so', which is why status answers UNKNOWN rather than NONE_VERIFIED. Cleared by any blocker mutation, because a verification is a statement about one state of the ledger and the ledger changing makes it stale rather than merely older.",
+      "required": [
+        "at",
+        "by",
+        "state_revision",
+        "event_id"
+      ],
+      "properties": {
+        "at": {
+          "type": "string"
+        },
+        "by": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
     },
     "risks": {
       "type": "array"

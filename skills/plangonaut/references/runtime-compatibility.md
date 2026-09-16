@@ -7,18 +7,18 @@ Match the workflow to observed host capabilities, not a model name. One canonica
 - Markdown skill/references or Portable Edition work without the CLI for any project size.
 - Skill installation makes instructions discoverable; it does not activate programmatic state management.
 - npm/npx or a verified standalone CLI supplies mechanics. Source checkout requires a compatible build/runtime. None supplies a reasoning model.
-- A repository distributes or develops Beave; the user's project need not use Git or npm.
+- A repository distributes or develops Plangonaut; the user's project need not use Git or npm.
 - Studio is a separate optional desktop reader/editor, not the CLI executable.
 
 ## Current exporter conventions
 
 | Target | Generated location |
 |---|---|
-| codex | .agents/skills/beave/ |
-| claude | .claude/skills/beave/ |
-| gemini | .agents/skills/beave/ |
-| agy | .agents/skills/beave/ |
-| portable | beave-portable.md in the chosen output directory |
+| codex | .agents/skills/plangonaut/ |
+| claude | .claude/skills/plangonaut/ |
+| gemini | .agents/skills/plangonaut/ |
+| agy | .agents/skills/plangonaut/ |
+| portable | plangonaut-portable.md in the chosen output directory |
 
 These are observed exporter paths, not proof every host/version discovers them. Verify actual discovery before claiming support. Preview destinations and preserve installations. verify-install checks copied content, not model behavior or native capabilities.
 

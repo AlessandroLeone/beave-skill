@@ -15,11 +15,11 @@ import { ageProject } from "./older-engine.mjs";
  *
  * Every test here is a behaviour, not a restatement of the implementation. Each
  * was checked against a reverted build kept outside this repository: the build
- * compiled, `beave version` answered, and the test went red for the reason the
+ * compiled, `plangonaut version` answered, and the test went red for the reason the
  * blocker describes.
  */
 
-const CLI = path.resolve("lib/bin/beave.js");
+const CLI = path.resolve("lib/bin/plangonaut.js");
 const owners = { product: "A", technical: "B", budget: "C", safety: "D", release: "E" };
 
 function run(args, cwd) {
@@ -40,7 +40,7 @@ function run(args, cwd) {
 }
 
 function project(name) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "beave-fix-"));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plangonaut-fix-"));
   fs.writeFileSync(path.join(root, "owners.json"), JSON.stringify(owners));
   const result = run([
     "init", "--project-root", ".", "--project-name", name, "--project-mode", "Genesis",
@@ -64,11 +64,11 @@ function exportableProject(name) {
 }
 
 function state(root) {
-  return JSON.parse(fs.readFileSync(path.join(root, ".beave", "state.json"), "utf8"));
+  return JSON.parse(fs.readFileSync(path.join(root, ".plangonaut", "state.json"), "utf8"));
 }
 
 function events(root) {
-  return fs.readFileSync(path.join(root, ".beave", "events.jsonl"), "utf8")
+  return fs.readFileSync(path.join(root, ".plangonaut", "events.jsonl"), "utf8")
     .split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
 }
 
@@ -283,10 +283,10 @@ describe("blocker 1 — reconcile and a next action a person wrote", () => {
     assert.strictEqual(pack.status, 0, pack.stderr);
     assert.ok(pack.stdout.includes(handoff), "the context pack must carry it");
 
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
     assert.strictEqual(run(["project-verify", "--package-dir", pkg], root).status, 0);
-    const destination = path.join(tempDir("beave-fix-dst-"), "delivered");
+    const destination = path.join(tempDir("plangonaut-fix-dst-"), "delivered");
     assert.strictEqual(run(["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-IMPORT-PRESERVED"], root).status, 0);
 
     assert.strictEqual(state(destination).exact_next_action, handoff);
@@ -342,7 +342,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
     const recorded = state(root).human_overrides[0];
     assert.strictEqual(recorded.reconciliation_evidence, "evidence/reconciliation.md");
 
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
     const entry = path.join(pkg, "files", "evidence", "reconciliation.md");
     assert.ok(fs.existsSync(entry), "the package must contain the reconciliation evidence");
@@ -353,7 +353,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
     );
     assert.strictEqual(run(["project-verify", "--package-dir", pkg], root).status, 0);
 
-    const destination = path.join(tempDir("beave-fix-dst-"), "delivered");
+    const destination = path.join(tempDir("plangonaut-fix-dst-"), "delivered");
     assert.strictEqual(run(["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-IMPORT-B3"], root).status, 0);
     const restored = path.join(destination, evidenceRelative);
     assert.ok(fs.existsSync(restored), "import must put it back where the ledger points");
@@ -366,7 +366,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
 
   it("project-verify refuses a package the evidence was removed from", () => {
     const { root } = reconciledExportable("Blocker3Missing");
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
 
     // Removed from the package as a recipient would receive it: the manifest entry
@@ -387,7 +387,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
 
   it("project-verify refuses a package the evidence was altered in", () => {
     const { root } = reconciledExportable("Blocker3Altered");
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
 
     const target = path.join(pkg, "files", "evidence", "reconciliation.md");
@@ -414,7 +414,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
   it("refuses to export a project whose reconciliation evidence has gone missing", () => {
     const { root, evidenceRelative } = reconciledExportable("Blocker3Gone");
     fs.rmSync(path.join(root, evidenceRelative));
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     const result = run(["project-export", "--project-root", ".", "--output-dir", pkg], root);
     assert.strictEqual(result.status, 2, result.stdout);
     assert.match(result.stderr, /records reconciliation evidence at evidence\/reconciliation\.md, and that file is missing/);
@@ -429,7 +429,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
     assert.strictEqual(run(["override", "--project-root", ".", "--instruction-file", "instruction.md", "--owner", "A"], root).status, 0);
     const overrideId = state(root).human_overrides[0].id;
 
-    const outside = path.join(tempDir("beave-fix-outside-"), "elsewhere.md");
+    const outside = path.join(tempDir("plangonaut-fix-outside-"), "elsewhere.md");
     fs.writeFileSync(outside, "kept somewhere the folder cannot reach\n");
     const escaped = run(["reconcile", "--project-root", ".", "--override-id", overrideId,
                          "--evidence-file", outside, "--owner", "A"], root);
@@ -439,12 +439,12 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
 
     // And the reserved directory is refused for the same reason: `files/` in the
     // package cannot hold it, so the digest would travel without the document.
-    const reserved = path.join(root, ".beave", "smuggled.md");
+    const reserved = path.join(root, ".plangonaut", "smuggled.md");
     fs.writeFileSync(reserved, "inside the reserved directory\n");
     const inReserved = run(["reconcile", "--project-root", ".", "--override-id", overrideId,
                             "--evidence-file", reserved, "--owner", "A"], root);
     assert.strictEqual(inReserved.status, 2, inReserved.stdout);
-    assert.match(inReserved.stderr, /reserved \.beave directory/);
+    assert.match(inReserved.stderr, /reserved \.plangonaut and \.beave directories/);
     assert.strictEqual(state(root).human_overrides[0].status, "OPEN");
   });
 
@@ -452,7 +452,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
     // A hand-built package is what a recipient actually receives: the check has to
     // hold against a manifest nobody in this process produced.
     const { root } = reconciledExportable("Blocker3Forged");
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
 
     const embedded = path.join(pkg, "state", "state.json");
@@ -494,7 +494,7 @@ describe("blocker 3 — the package carries the reconciliation evidence", () => 
     const recorded = state(root).human_overrides;
     assert.notStrictEqual(recorded[0].reconciliation_sha256, recorded[1].reconciliation_sha256);
 
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     const result = run(["project-export", "--project-root", ".", "--output-dir", pkg], root);
     assert.strictEqual(result.status, 2, result.stdout);
     assert.match(result.stderr, /Reconciliation evidence digest mismatch/);
@@ -564,7 +564,7 @@ describe("blocker 4 — portable separators", () => {
       0,
     );
 
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
     const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "manifest.json"), "utf8"));
     for (const item of manifest.files) {
@@ -594,7 +594,7 @@ describe("blocker 4 — portable separators", () => {
     // written before the rule is not broken and is not rewritten behind anyone's
     // back — this test is the guarantee the two ALN-005 pilots depend on.
     const root = exportableProject("Historic");
-    const ledger = path.join(root, ".beave", "state.json");
+    const ledger = path.join(root, ".plangonaut", "state.json");
     const before = JSON.parse(fs.readFileSync(ledger, "utf8"));
     before.artifacts[0].base_path = before.artifacts[0].base_path.replaceAll("/", "\\");
     before.artifacts[0].working_path = before.artifacts[0].working_path.replaceAll("/", "\\");
@@ -602,11 +602,11 @@ describe("blocker 4 — portable separators", () => {
     ageProject(root);
 
     assert.strictEqual(run(["validate", "--project-root", "."], root).status, 0, "a historic spelling must still validate");
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     assert.strictEqual(run(["project-export", "--project-root", ".", "--output-dir", pkg], root).status, 0);
     const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "manifest.json"), "utf8"));
     for (const item of manifest.files) assert.doesNotMatch(item.path, /\\/, "the package is canonical even from a historic ledger");
-    const destination = path.join(tempDir("beave-fix-dst-"), "delivered");
+    const destination = path.join(tempDir("plangonaut-fix-dst-"), "delivered");
     assert.strictEqual(run(["project-import", "--package-dir", pkg, "--project-root", destination, "--operation-id", "OP-IMPORT-HIST"], root).status, 0);
     assert.strictEqual(run(["validate", "--project-root", "."], destination).status, 0);
   });
@@ -622,7 +622,7 @@ describe("blocker 4 — portable separators", () => {
       run(["doc-save", "--project-root", ".", "--id", "ART-1", "--base-path", "docs/plan.md", "--content-file", "doc.md", "--owner", "A"], root).status,
       0,
     );
-    const ledger = path.join(root, ".beave", "state.json");
+    const ledger = path.join(root, ".plangonaut", "state.json");
     const before = JSON.parse(fs.readFileSync(ledger, "utf8"));
     before.artifacts[0].base_path = "docs\\plan.md";
     before.artifacts[0].working_path = "docs\\plan-v1.md";
@@ -670,12 +670,12 @@ describe("blocker 6 — the export refusal names what is missing and what to do"
     );
     const before = state(root);
 
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     const result = run(["project-export", "--project-root", ".", "--output-dir", pkg], root);
     assert.strictEqual(result.status, 2, result.stdout);
     assert.match(result.stderr, /must carry at least one PUBLISHED Markdown document/);
     assert.match(result.stderr, /still in DRAFT — ART-1 \(docs\/plan\.md\)/);
-    assert.match(result.stderr, /beave doc-finalize --project-root \. --id ART-1 --owner <owner> --operation-id <id>/);
+    assert.match(result.stderr, /plangonaut doc-finalize --project-root \. --id ART-1 --owner <owner> --operation-id <id>/);
     assert.match(result.stderr, /Nothing was written and no document was published/);
 
     // The gate is unchanged and the refusal publishes nothing.
@@ -691,12 +691,12 @@ describe("blocker 6 — the export refusal names what is missing and what to do"
 
   it("names the route from scratch when the ledger holds no document at all", () => {
     const root = project("NoDocuments");
-    const pkg = path.join(tempDir("beave-fix-pkg-"), "pkg");
+    const pkg = path.join(tempDir("plangonaut-fix-pkg-"), "pkg");
     const result = run(["project-export", "--project-root", ".", "--output-dir", pkg], root);
     assert.strictEqual(result.status, 2, result.stdout);
     assert.match(result.stderr, /no documents at all in the ledger/);
-    assert.match(result.stderr, /beave doc-diff --project-root \./);
-    assert.match(result.stderr, /beave doc-save --project-root \./);
-    assert.match(result.stderr, /beave doc-finalize --project-root \./);
+    assert.match(result.stderr, /plangonaut doc-diff --project-root \./);
+    assert.match(result.stderr, /plangonaut doc-save --project-root \./);
+    assert.match(result.stderr, /plangonaut doc-finalize --project-root \./);
   });
 });
