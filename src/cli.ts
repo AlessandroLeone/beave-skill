@@ -9024,7 +9024,13 @@ export async function main(argv: string[]): Promise<number> {
     const { command, flags } = parse(argv);
     assertKnownOptions(command, flags);
     if (!command || command === "help" || command === "--help" || command === "-h") help();
-    else if (command === "version" || command === "--version" || command === "-v") console.log(VERSION);
+    // The product name travels with the number, because something has to read
+    // this and decide whether the file it just found is *this* tool. Studio's
+    // detection does exactly that — it runs `--version` on whatever is on the
+    // PATH and only calls it verified when the answer names the product — and a
+    // bare version string left every correct installation marked unverified.
+    else if (command === "version" || command === "--version" || command === "-v")
+      console.log(`plangonaut ${VERSION}`);
     else if (command === "capabilities") capabilities();
     else if (command === "init") init(flags);
     else if (command === "status") status(flags);
