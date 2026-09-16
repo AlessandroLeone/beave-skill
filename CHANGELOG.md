@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0-alpha.2
+
+- Correct the public npm README and installation instructions after the first Plangonaut package was published with stale pre-rename release wording.
+- Keep the programmatic and semantic installation paths explicit: `plangonaut@alpha` installs the CLI; `plangonaut install` installs the skill into a chosen project and host.
+
 ## 0.3.0-alpha.1
 
 **Beave was renamed to Plangonaut.** The product, the command, the skill and the project state

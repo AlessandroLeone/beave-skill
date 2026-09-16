@@ -11,11 +11,29 @@ A repository distributes/develops Plangonaut; npm/npx and a verified CLI executa
 
 ## Current alpha
 
-Version 0.2.0-alpha.3 remains an alpha, not a release-readiness claim. The CLI target is Node 24 without mandatory third-party runtime dependencies. Verify actual package/executable availability and host support before installation. Source code and build scripts do not prove a published package or supported native artifact exists.
+Version 0.3.0-alpha.2 is published on npm under the `alpha` channel. It remains a prerelease, not a release-readiness claim. The CLI target is Node 24 without mandatory third-party runtime dependencies. A supported native Studio installer has not been published yet.
 
 The CLI exposes installation, Portable/adapters, typed ledgers, structural gate prerequisites, governed document operations and digest-verified project handoff. Project-state mutations use caller operation IDs; document saves require the token returned by their reviewed preview, and interrupted file operations are recovered from a local journal. Structural success never certifies semantic completeness; read the engine guide before relying on a check.
 
 ## Start
+
+Install the CLI from the explicit prerelease channel:
+
+```sh
+npm install --global plangonaut@alpha
+plangonaut --version
+plangonaut capabilities
+```
+
+Install the semantic skill into a project only after previewing its destination:
+
+```sh
+plangonaut install --target codex --scope project --project-root . --dry-run
+plangonaut install --target codex --scope project --project-root .
+plangonaut verify-install --target codex --scope project --project-root .
+```
+
+Use `claude`, `gemini` or `agy` in place of `codex` for another supported host. The complete skill ZIP and Portable Markdown edition are also available from [plangonaut.com/download.html](https://plangonaut.com/download.html#skill-cli).
 
 Provide the skill/references or Portable Edition to the chosen host. Establish missing authority and persistence, inspect existing material and follow coverage through the complete agreed outcome. After initialization the same agent or a fresh execution system may proceed when authorized. Studio, board review and a model change are optional.
 
