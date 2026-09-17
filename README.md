@@ -1,3 +1,18 @@
+> # ⚠️ This repository has moved
+>
+> The project is called **Plangonaut**. Public development continues at
+> **[github.com/AlessandroLeone/plangonaut-skill](https://github.com/AlessandroLeone/plangonaut-skill)**,
+> which is where releases, issues and new work belong from 2026-09-17.
+>
+> On npm the package is **[`plangonaut`](https://www.npmjs.com/package/plangonaut)** — install it with
+> `npm install --global plangonaut@alpha`.
+>
+> **This repository stays.** It is the history of the work done under the project's earlier name,
+> kept readable and unchanged. Nothing is deleted: the commits, the branch and the
+> `v0.2.0-alpha.3` tag are where they were. It simply receives no further releases.
+
+---
+
 # Plangonaut
 
 Plangonaut prepares a complete multidisciplinary project folder: specifications, decisions, resources, execution strategy, agents where useful, tasks, verification, recovery and completion conditions. It asks all necessary questions without a total question or document cap.
