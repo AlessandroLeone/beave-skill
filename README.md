@@ -11,7 +11,7 @@ A repository distributes/develops Plangonaut; npm/npx and a verified CLI executa
 
 ## Current alpha
 
-Version 0.3.0-alpha.2 is published on npm under the `alpha` channel. It remains a prerelease, not a release-readiness claim. The CLI target is Node 24 without mandatory third-party runtime dependencies. A supported native Studio installer has not been published yet.
+Version 0.3.0-alpha.3 is **prepared but not published**: it is the version this source declares, and the newest one on npm is `0.3.0-alpha.2` under the `alpha` channel until a publication is authorised. It remains a prerelease, not a release-readiness claim. The CLI target is Node 24 without mandatory third-party runtime dependencies. A supported native Studio installer has not been published yet.
 
 The CLI exposes installation, Portable/adapters, typed ledgers, structural gate prerequisites, governed document operations and digest-verified project handoff. Project-state mutations use caller operation IDs; document saves require the token returned by their reviewed preview, and interrupted file operations are recovered from a local journal. Structural success never certifies semantic completeness; read the engine guide before relying on a check.
 

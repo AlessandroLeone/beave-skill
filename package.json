@@ -1,6 +1,6 @@
 {
   "name": "plangonaut",
-  "version": "0.3.0-alpha.2",
+  "version": "0.3.0-alpha.3",
   "description": "Human-governed project discovery, planning, multi-agent orchestration, and durable resume.",
   "type": "module",
   "bin": {

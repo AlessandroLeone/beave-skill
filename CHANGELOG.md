@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0-alpha.3
+
+- One version across the product. The skill and the CLI were on `0.3.0-alpha.2` while Studio and its
+  installer were still on `0.3.0-alpha.1`, so "which Plangonaut is this" had two answers depending on
+  which half you asked. Every current surface now declares `0.3.0-alpha.3`; the versions inside
+  histories, migrations and recorded evidence keep the numbers they really describe.
+- Studio declares the core it was tested against as `ENGINE-001 (0.3.0-alpha.3)`, which is this
+  release, because this is the CLI it was built and exercised with.
+- **Prepared locally. Not published**: no npm publish, no dist-tag change, no tag, no upload.
+
 ## 0.3.0-alpha.2
 
 - Correct the public npm README and installation instructions after the first Plangonaut package was published with stale pre-rename release wording.
